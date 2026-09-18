@@ -59,6 +59,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_AW88081
 	imply SND_SOC_AW88166
 	imply SND_SOC_AW88261
+	imply SND_SOC_AW88263S
 	imply SND_SOC_AW88399
 	imply SND_SOC_BT_SCO
 	imply SND_SOC_BD28623
@@ -703,6 +704,16 @@ config SND_SOC_AW88261
 	  digital Smart K audio amplifier. The output voltage of
 	  boost converter can be adjusted smartly according to
 	  the input amplitude.
+
+config SND_SOC_AW88263S
+	tristate "Soc Audio for awinic aw88263s"
+	depends on I2C
+	select REGMAP_I2C
+	select GPIOLIB
+	select SND_SOC_AW88395_LIB
+	help
+	  Enable support for the Awinic AW88263S I2S/TDM smart speaker
+	  amplifier with its integrated 10.25 V smart boost converter.
 
 config SND_SOC_AW88081
 	tristate "Soc Audio for awinic aw88081/aw88083"
