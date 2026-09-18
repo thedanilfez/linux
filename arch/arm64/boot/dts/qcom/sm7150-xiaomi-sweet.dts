@@ -147,9 +147,9 @@
         speaker_amp: audio-codec@34 {
 		compatible = "awinic,aw88263s";
 		reg = <0x34>;
+		firmware-name = "qcom/sm7150/xiaomi/sweet/aw882xx_pid_2032_acf.bin";
 
 		reset-gpios = <&tlmm 64 GPIO_ACTIVE_HIGH>;
-		irq-gpio = <&tlmm 93 GPIO_ACTIVE_HIGH>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&amp_t_int_default>;
@@ -165,9 +165,9 @@
 	mic_amp: audio-codec@35 {
 		compatible = "awinic,aw88263s";
 		reg = <0x35>;
+		firmware-name = "qcom/sm7150/xiaomi/sweet/aw882xx_pid_2032_acf.bin";
 
 		reset-gpios = <&tlmm 72 GPIO_ACTIVE_HIGH>;
-		irq-gpio = <&tlmm 56 GPIO_ACTIVE_HIGH>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&amp_b_int_default>;
