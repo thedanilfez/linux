@@ -74,6 +74,13 @@
 		};
 	};
 
+	battery: battery {
+		compatible = "simple-battery";
+		voltage-min-design-microvolt = <3300000>;
+		voltage-max-design-microvolt = <4450000>;
+		charge-full-design-microamp-hours = <5020000>;
+	};
+
 	sound {
 		compatible = "qcom,sm8250-sndcard";
 		pinctrl-0 = <&pri_mi2s_active &pri_mi2s_ws_active>;
@@ -189,6 +196,17 @@
 		regulator-boot-on;
 		startup-delay-us = <4000>;
 	};
+};
+
+&pm6150_charger {
+	monitored-battery = <&battery>;
+	status = "okay";
+};
+
+&pm6150_qgauge {
+	monitored-battery = <&battery>;
+	power-supplies = <&pm6150_charger>;
+	status = "okay";
 };
 
 &dispcc {
