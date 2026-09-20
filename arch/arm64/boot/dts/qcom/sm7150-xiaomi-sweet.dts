@@ -181,6 +181,18 @@
 };
 
 &i2c7 {
+	/delete-property/ interconnects;
+
+	interconnects = <&aggre2_noc MASTER_QUP_1 QCOM_ICC_TAG_ALWAYS
+			 &config_noc SLAVE_QUP_1 QCOM_ICC_TAG_ALWAYS>,
+			<&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ALWAYS
+			 &config_noc SLAVE_QUP_1 QCOM_ICC_TAG_ALWAYS>,
+			<&aggre2_noc MASTER_QUP_1 QCOM_ICC_TAG_ALWAYS
+			 &mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ALWAYS>;
+	interconnect-names = "qup-core",
+				     "qup-config",
+				     "qup-memory";
+
 	clock-frequency = <100000>;
 	status = "okay";
 
