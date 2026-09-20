@@ -230,6 +230,14 @@
 	pins = "gpio31", "gpio36", "gpio66";
 };
 
+&pm6150l_flash {
+	status = "okay";
+
+	led-1 {
+		led-max-microamp = <300000>;
+	};
+};
+
 &nxp {
 	enable-gpios = <&tlmm 66 GPIO_ACTIVE_HIGH>;
 };
