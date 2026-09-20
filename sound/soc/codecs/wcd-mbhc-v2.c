@@ -1614,6 +1614,9 @@ EXPORT_SYMBOL(wcd_mbhc_init);
 
 void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
 {
+	if (!mbhc)
+		return;
+
 	free_irq(mbhc->intr_ids->hph_right_ocp, mbhc);
 	free_irq(mbhc->intr_ids->hph_left_ocp, mbhc);
 	free_irq(mbhc->intr_ids->mbhc_hs_rem_intr, mbhc);
@@ -1622,10 +1625,15 @@ void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
 	free_irq(mbhc->intr_ids->mbhc_btn_press_intr, mbhc);
 	free_irq(mbhc->intr_ids->mbhc_sw_intr, mbhc);
 
-	mutex_lock(&mbhc->lock);
-	wcd_cancel_hs_detect_plug(mbhc,	&mbhc->correct_plug_swch);
+	/*
+	 * No new work can be queued after the IRQs above are released.  Stop
+	 * the plug-detect worker first since it can queue correct_plug_swch,
+	 * then stop all other work before releasing the object.
+	 */
 	cancel_work_sync(&mbhc->mbhc_plug_detect_work);
-	mutex_unlock(&mbhc->lock);
+	cancel_delayed_work_sync(&mbhc->mbhc_btn_dwork);
+	mbhc->hs_detect_work_stop = true;
+	cancel_work_sync(&mbhc->correct_plug_swch);
 
 	kfree(mbhc);
 }
