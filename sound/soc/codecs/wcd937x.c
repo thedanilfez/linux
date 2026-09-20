@@ -5,6 +5,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/irqdomain.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -103,6 +104,10 @@ struct wcd937x_priv {
 
 	struct gpio_desc *us_euro_gpio;
 	struct gpio_desc *reset_gpio;
+	int irq_parent;
+	bool hphr_pdm_wd_irq_requested;
+	bool hphl_pdm_wd_irq_requested;
+	bool aux_pdm_wd_irq_requested;
 
 	atomic_t rx_clk_cnt;
 	atomic_t ana_clk_count;
@@ -2010,6 +2015,7 @@ static int wcd937x_mbhc_init(struct snd_soc_component *component)
 {
 	struct wcd937x_priv *wcd937x = snd_soc_component_get_drvdata(component);
 	struct wcd_mbhc_intr *intr_ids = &wcd937x->intr_ids;
+	struct wcd_mbhc *mbhc;
 
 	intr_ids->mbhc_sw_intr = regmap_irq_get_virq(wcd937x->irq_chip,
 						     WCD937X_IRQ_MBHC_SW_DET);
@@ -2026,9 +2032,11 @@ static int wcd937x_mbhc_init(struct snd_soc_component *component)
 	intr_ids->hph_right_ocp = regmap_irq_get_virq(wcd937x->irq_chip,
 						      WCD937X_IRQ_HPHR_OCP_INT);
 
-	wcd937x->wcd_mbhc = wcd_mbhc_init(component, &mbhc_cb, intr_ids, wcd_mbhc_fields, true);
-	if (IS_ERR(wcd937x->wcd_mbhc))
-		return PTR_ERR(wcd937x->wcd_mbhc);
+	mbhc = wcd_mbhc_init(component, &mbhc_cb, intr_ids, wcd_mbhc_fields, true);
+	if (IS_ERR(mbhc))
+		return PTR_ERR(mbhc);
+
+	wcd937x->wcd_mbhc = mbhc;
 
 	snd_soc_add_component_controls(component, impedance_detect_controls,
 				       ARRAY_SIZE(impedance_detect_controls));
@@ -2042,7 +2050,10 @@ static void wcd937x_mbhc_deinit(struct snd_soc_component *component)
 {
 	struct wcd937x_priv *wcd937x = snd_soc_component_get_drvdata(component);
 
-	wcd_mbhc_deinit(wcd937x->wcd_mbhc);
+	if (wcd937x->wcd_mbhc) {
+		wcd_mbhc_deinit(wcd937x->wcd_mbhc);
+		wcd937x->wcd_mbhc = NULL;
+	}
 }
 
 /* END MBHC */
@@ -2481,18 +2492,128 @@ static const struct irq_domain_ops wcd_domain_ops = {
 	.map = wcd_irq_chip_map,
 };
 
+static void wcd937x_irq_exit(struct wcd937x_priv *wcd)
+{
+	if (wcd->sdw_priv[AIF1_PB])
+		wcd->sdw_priv[AIF1_PB]->slave_irq = NULL;
+	if (wcd->sdw_priv[AIF1_CAP])
+		wcd->sdw_priv[AIF1_CAP]->slave_irq = NULL;
+
+	if (wcd->irq_chip) {
+		regmap_del_irq_chip(wcd->irq_parent, wcd->irq_chip);
+		wcd->irq_chip = NULL;
+	}
+
+	if (wcd->irq_parent) {
+		irq_dispose_mapping(wcd->irq_parent);
+		wcd->irq_parent = 0;
+	}
+
+	if (wcd->virq) {
+		irq_domain_remove(wcd->virq);
+		wcd->virq = NULL;
+	}
+}
+
 static int wcd937x_irq_init(struct wcd937x_priv *wcd, struct device *dev)
 {
+	int ret;
+
+	if (wcd->virq || wcd->irq_parent || wcd->irq_chip)
+		return -EBUSY;
+
 	wcd->virq = irq_domain_create_linear(NULL, 1, &wcd_domain_ops, NULL);
 	if (!(wcd->virq)) {
 		dev_err(dev, "%s: Failed to add IRQ domain\n", __func__);
 		return -EINVAL;
 	}
 
-	return devm_regmap_add_irq_chip(dev, wcd->regmap,
-					irq_create_mapping(wcd->virq, 0),
-					IRQF_ONESHOT, 0, &wcd937x_regmap_irq_chip,
-					&wcd->irq_chip);
+	wcd->irq_parent = irq_create_mapping(wcd->virq, 0);
+	if (!wcd->irq_parent) {
+		dev_err(dev, "%s: Failed to create IRQ mapping\n", __func__);
+		ret = -EINVAL;
+		goto err_domain;
+	}
+
+	ret = regmap_add_irq_chip(wcd->regmap, wcd->irq_parent,
+					  IRQF_ONESHOT, 0, &wcd937x_regmap_irq_chip,
+					  &wcd->irq_chip);
+	if (ret)
+		goto err_mapping;
+
+	return 0;
+
+err_mapping:
+	irq_dispose_mapping(wcd->irq_parent);
+	wcd->irq_parent = 0;
+err_domain:
+	irq_domain_remove(wcd->virq);
+	wcd->virq = NULL;
+	return ret;
+}
+
+static void wcd937x_free_watchdog_irqs(struct wcd937x_priv *wcd)
+{
+	if (wcd->aux_pdm_wd_irq_requested) {
+		free_irq(wcd->aux_pdm_wd_int, wcd);
+		wcd->aux_pdm_wd_irq_requested = false;
+	}
+
+	if (wcd->hphl_pdm_wd_irq_requested) {
+		free_irq(wcd->hphl_pdm_wd_int, wcd);
+		wcd->hphl_pdm_wd_irq_requested = false;
+	}
+
+	if (wcd->hphr_pdm_wd_irq_requested) {
+		free_irq(wcd->hphr_pdm_wd_int, wcd);
+		wcd->hphr_pdm_wd_irq_requested = false;
+	}
+}
+
+static int wcd937x_request_watchdog_irqs(struct device *dev,
+						struct wcd937x_priv *wcd)
+{
+	int ret;
+
+	ret = request_threaded_irq(wcd->hphr_pdm_wd_int, NULL,
+					   wcd937x_wd_handle_irq,
+					   IRQF_ONESHOT | IRQF_TRIGGER_RISING,
+					   "HPHR PDM WDOG INT", wcd);
+	if (ret) {
+		dev_err(dev, "Failed to request HPHR watchdog interrupt (%d)\n", ret);
+		return ret;
+	}
+	wcd->hphr_pdm_wd_irq_requested = true;
+
+	ret = request_threaded_irq(wcd->hphl_pdm_wd_int, NULL,
+					   wcd937x_wd_handle_irq,
+					   IRQF_ONESHOT | IRQF_TRIGGER_RISING,
+					   "HPHL PDM WDOG INT", wcd);
+	if (ret) {
+		dev_err(dev, "Failed to request HPHL watchdog interrupt (%d)\n", ret);
+		goto err;
+	}
+	wcd->hphl_pdm_wd_irq_requested = true;
+
+	ret = request_threaded_irq(wcd->aux_pdm_wd_int, NULL,
+					   wcd937x_wd_handle_irq,
+					   IRQF_ONESHOT | IRQF_TRIGGER_RISING,
+					   "AUX PDM WDOG INT", wcd);
+	if (ret) {
+		dev_err(dev, "Failed to request AUX watchdog interrupt (%d)\n", ret);
+		goto err;
+	}
+	wcd->aux_pdm_wd_irq_requested = true;
+
+	disable_irq_nosync(wcd->hphr_pdm_wd_int);
+	disable_irq_nosync(wcd->hphl_pdm_wd_int);
+	disable_irq_nosync(wcd->aux_pdm_wd_int);
+
+	return 0;
+
+err:
+	wcd937x_free_watchdog_irqs(wcd);
+	return ret;
 }
 
 static int wcd937x_soc_codec_probe(struct snd_soc_component *component)
@@ -2540,52 +2661,39 @@ static int wcd937x_soc_codec_probe(struct snd_soc_component *component)
 	wcd937x->aux_pdm_wd_int = regmap_irq_get_virq(wcd937x->irq_chip,
 						      WCD937X_IRQ_AUX_PDM_WD_INT);
 
-	/* Request for watchdog interrupt */
-	ret = devm_request_threaded_irq(dev, wcd937x->hphr_pdm_wd_int, NULL, wcd937x_wd_handle_irq,
-					IRQF_ONESHOT | IRQF_TRIGGER_RISING,
-					"HPHR PDM WDOG INT", wcd937x);
+	ret = wcd937x_request_watchdog_irqs(dev, wcd937x);
 	if (ret)
-		dev_err(dev, "Failed to request HPHR watchdog interrupt (%d)\n", ret);
-
-	ret = devm_request_threaded_irq(dev, wcd937x->hphl_pdm_wd_int, NULL, wcd937x_wd_handle_irq,
-					IRQF_ONESHOT | IRQF_TRIGGER_RISING,
-					"HPHL PDM WDOG INT", wcd937x);
-	if (ret)
-		dev_err(dev, "Failed to request HPHL watchdog interrupt (%d)\n", ret);
-
-	ret = devm_request_threaded_irq(dev, wcd937x->aux_pdm_wd_int, NULL, wcd937x_wd_handle_irq,
-					IRQF_ONESHOT | IRQF_TRIGGER_RISING,
-					"AUX PDM WDOG INT", wcd937x);
-	if (ret)
-		dev_err(dev, "Failed to request Aux watchdog interrupt (%d)\n", ret);
-
-	/* Disable watchdog interrupt for HPH and AUX */
-	disable_irq_nosync(wcd937x->hphr_pdm_wd_int);
-	disable_irq_nosync(wcd937x->hphl_pdm_wd_int);
-	disable_irq_nosync(wcd937x->aux_pdm_wd_int);
+		goto err_free_clsh;
 
 	if (chipid == CHIPID_WCD9375) {
 		ret = snd_soc_dapm_new_controls(dapm, wcd9375_dapm_widgets,
 						ARRAY_SIZE(wcd9375_dapm_widgets));
 		if (ret < 0) {
 			dev_err(component->dev, "Failed to add snd_ctls\n");
-			wcd_clsh_ctrl_free(wcd937x->clsh_info);
-			return ret;
+			goto err_free_resources;
 		}
 
 		ret = snd_soc_dapm_add_routes(dapm, wcd9375_audio_map,
 					      ARRAY_SIZE(wcd9375_audio_map));
 		if (ret < 0) {
 			dev_err(component->dev, "Failed to add routes\n");
-			wcd_clsh_ctrl_free(wcd937x->clsh_info);
-			return ret;
+			goto err_free_resources;
 		}
 	}
 
 	ret = wcd937x_mbhc_init(component);
-	if (ret)
+	if (ret) {
 		dev_err(component->dev, "mbhc initialization failed\n");
+		goto err_free_resources;
+	}
 
+	return 0;
+
+err_free_resources:
+	wcd937x_free_watchdog_irqs(wcd937x);
+err_free_clsh:
+	wcd_clsh_ctrl_free(wcd937x->clsh_info);
+	wcd937x->clsh_info = NULL;
 	return ret;
 }
 
@@ -2594,11 +2702,10 @@ static void wcd937x_soc_codec_remove(struct snd_soc_component *component)
 	struct wcd937x_priv *wcd937x = snd_soc_component_get_drvdata(component);
 
 	wcd937x_mbhc_deinit(component);
-	free_irq(wcd937x->aux_pdm_wd_int, wcd937x);
-	free_irq(wcd937x->hphl_pdm_wd_int, wcd937x);
-	free_irq(wcd937x->hphr_pdm_wd_int, wcd937x);
+	wcd937x_free_watchdog_irqs(wcd937x);
 
 	wcd_clsh_ctrl_free(wcd937x->clsh_info);
+	wcd937x->clsh_info = NULL;
 }
 
 static int wcd937x_codec_set_jack(struct snd_soc_component *comp,
@@ -2606,6 +2713,9 @@ static int wcd937x_codec_set_jack(struct snd_soc_component *comp,
 {
 	struct wcd937x_priv *wcd = dev_get_drvdata(comp->dev);
 	int ret = 0;
+
+	if (!wcd->wcd_mbhc)
+		return jack ? -ENODEV : 0;
 
 	if (jack)
 		ret = wcd_mbhc_start(wcd->wcd_mbhc, &wcd->mbhc_cfg, jack);
@@ -2830,11 +2940,13 @@ static int wcd937x_bind(struct device *dev)
 					 wcd937x_dais, ARRAY_SIZE(wcd937x_dais));
 	if (ret) {
 		dev_err(dev, "Codec registration failed\n");
-		goto err_remove_link3;
+		goto err_irq;
 	}
 
 	return ret;
 
+err_irq:
+	wcd937x_irq_exit(wcd937x);
 err_remove_link3:
 	device_link_remove(dev, wcd937x->rxdev);
 err_remove_link2:
@@ -2855,11 +2967,11 @@ static void wcd937x_unbind(struct device *dev)
 	struct wcd937x_priv *wcd937x = dev_get_drvdata(dev);
 
 	snd_soc_unregister_component(dev);
+	wcd937x_irq_exit(wcd937x);
 	device_link_remove(dev, wcd937x->txdev);
 	device_link_remove(dev, wcd937x->rxdev);
 	device_link_remove(wcd937x->rxdev, wcd937x->txdev);
 	component_unbind_all(dev, wcd937x);
-	mutex_destroy(&wcd937x->micb_lock);
 	put_device(wcd937x->txdev);
 	put_device(wcd937x->rxdev);
 }
@@ -2909,7 +3021,6 @@ static int wcd937x_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, wcd937x);
-	mutex_init(&wcd937x->micb_lock);
 	wcd937x->common.dev = dev;
 	wcd937x->common.max_bias = 3;
 
@@ -2951,10 +3062,13 @@ static int wcd937x_probe(struct platform_device *pdev)
 		return ret;
 
 	wcd937x_reset(wcd937x);
+	mutex_init(&wcd937x->micb_lock);
 
 	ret = component_master_add_with_match(dev, &wcd937x_comp_ops, match);
-	if (ret)
+	if (ret) {
+		mutex_destroy(&wcd937x->micb_lock);
 		return ret;
+	}
 
 	pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_use_autosuspend(dev);
@@ -2969,8 +3083,12 @@ static int wcd937x_probe(struct platform_device *pdev)
 static void wcd937x_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	struct wcd937x_priv *wcd937x = dev_get_drvdata(dev);
 
 	component_master_del(&pdev->dev, &wcd937x_comp_ops);
+	wcd937x_irq_exit(wcd937x);
+
+	mutex_destroy(&wcd937x->micb_lock);
 
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);
