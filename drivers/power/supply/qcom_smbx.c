@@ -372,7 +372,7 @@ static int smbx_ov_status(struct smb_chip *chip)
 	if (rc)
 		return rc;
 
-	return !!(reg & mask);
+	return !!(val & mask);
 }
 
 static int smb_get_prop_status(struct smb_chip *chip, int *val)
@@ -416,10 +416,10 @@ static int smb_get_prop_status(struct smb_chip *chip, int *val)
 		*val = POWER_SUPPLY_STATUS_CHARGING;
 		return rc;
 	case DISABLE_CHARGE:
+	case INHIBIT_CHARGE:
 		*val = POWER_SUPPLY_STATUS_NOT_CHARGING;
 		return rc;
 	case TERMINATE_CHARGE:
-	case INHIBIT_CHARGE:
 		*val = POWER_SUPPLY_STATUS_FULL;
 		return rc;
 	default:
