@@ -218,14 +218,23 @@ config BATTERY_QCOM_BATTMGR
 	  power supply information.
 
 config BATTERY_QCOM_QG
-	tristate "Qualcomm PMIC QGauge driver"
+	tristate "Qualcomm PM6150 QG fuel gauge"
 	depends on MFD_SPMI_PMIC
 	depends on IIO
+	depends on NVMEM
+	depends on RTC_CLASS && RTC_HCTOSYS
 	help
-	  Say Y here to enable the Qualcomm Technologies, Inc. QGauge driver
-	  which uses the periodic sampling of the battery voltage and current
-	  to determine the battery state-of-charge (SOC) and supports other
-	  battery management features.
+	  Say Y here to enable the PM6150 QG battery gauge. It integrates
+	  hardware FIFO current samples and uses a battery OCV profile for
+	  initialization and recalibration.
+
+config BATTERY_QCOM_QG_KUNIT_TEST
+	tristate "KUnit tests for Qualcomm QG charge calculations"
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  Test QG charge unit conversions and usable capacity normalization,
+	  including batteries whose nAh full capacity exceeds 32 bits.
 
 config BATTERY_OLPC
 	tristate "One Laptop Per Child battery"

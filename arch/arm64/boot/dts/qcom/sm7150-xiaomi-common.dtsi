@@ -581,7 +581,6 @@
 
 &pm6150_qgauge {
 	monitored-battery = <&battery>;
-	status = "okay";
 };
 
 &pm6150_resin {
