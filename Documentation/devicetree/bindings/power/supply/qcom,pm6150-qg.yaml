@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/power/supply/qcom,pm6150-qg.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm PM6150 QG fuel gauge
+
+maintainers:
+  - Danila Tikhonov <danila@jiaxyga.com>
+
+description: |
+  The QG peripheral samples battery voltage and signed current into a FIFO.
+  Its SDAM peripheral retains the estimated battery state across reboots.
+  The monitored battery supplies the open circuit voltage profile and design
+  capacity required to initialize the charge estimate.
+
+allOf:
+  - $ref: power-supply.yaml#
+
+properties:
+  compatible:
+    const: qcom,pm6150-qg
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 2
+
+  interrupt-names:
+    items:
+      - const: fifo-done
+      - const: good-ocv
+
+  io-channels:
+    maxItems: 1
+
+  io-channel-names:
+    items:
+      - const: batt-therm
+
+  nvmem:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: QG SDAM peripheral
+
+  monitored-battery: true
+
+  power-supplies: true
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - interrupt-names
+  - io-channels
+  - io-channel-names
+  - nvmem
+  - monitored-battery
+  - power-supplies
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    pmic {
+      #address-cells = <1>;
+      #size-cells = <0>;
+
+      qgauge@4800 {
+        compatible = "qcom,pm6150-qg";
+        reg = <0x4800>;
+        interrupts = <0x0 0x48 0x3 IRQ_TYPE_EDGE_RISING>,
+                     <0x0 0x48 0x4 IRQ_TYPE_EDGE_RISING>;
+        interrupt-names = "fifo-done", "good-ocv";
+        io-channels = <&pm6150_adc 0x4a>;
+        io-channel-names = "batt-therm";
+        nvmem = <&pm6150_qg_sdam>;
+        monitored-battery = <&battery>;
+        power-supplies = <&pm6150_charger>;
+      };
+    };
