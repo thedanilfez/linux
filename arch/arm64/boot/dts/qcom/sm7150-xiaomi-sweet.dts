@@ -350,18 +350,6 @@
 };
 
 &i2c7 {
-	/delete-property/ interconnects;
-
-	interconnects = <&aggre2_noc MASTER_QUP_1 QCOM_ICC_TAG_ALWAYS
-			 &config_noc SLAVE_QUP_1 QCOM_ICC_TAG_ALWAYS>,
-			<&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ALWAYS
-			 &config_noc SLAVE_QUP_1 QCOM_ICC_TAG_ALWAYS>,
-			<&aggre2_noc MASTER_QUP_1 QCOM_ICC_TAG_ALWAYS
-			 &mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ALWAYS>;
-	interconnect-names = "qup-core",
-				     "qup-config",
-				     "qup-memory";
-
 	clock-frequency = <100000>;
 	status = "okay";
 
@@ -381,7 +369,45 @@
 	clock-frequency = <100000>;
 	status = "okay";
 
-	/* ovti,wl2866d (cam regulator) @ 28 */
+	regulator@28 {
+		compatible = "willsemi,wl2866d";
+		reg = <0x28>;
+
+		vin1-supply = <&vreg_s8c_1p35>;
+		vin2-supply = <&vreg_bob>;
+		enable-gpios = <&tlmm 30 GPIO_ACTIVE_HIGH>;
+
+		regulators {
+			dvdd1: dvdd1 {
+				regulator-name = "wl2866d-dvdd1";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+				regulator-active-discharge = <1>;
+			};
+
+			dvdd2: dvdd2 {
+				regulator-name = "wl2866d-dvdd2";
+				regulator-min-microvolt = <1050000>;
+				regulator-max-microvolt = <1050000>;
+				regulator-active-discharge = <1>;
+			};
+
+			avdd1: avdd1 {
+				regulator-name = "wl2866d-avdd1";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+				regulator-active-discharge = <1>;
+			};
+
+			avdd2: avdd2 {
+				regulator-name = "wl2866d-avdd2";
+				regulator-min-microvolt = <2700000>;
+				regulator-max-microvolt = <2700000>;
+				regulator-active-discharge = <1>;
+			};
+		};
+	};
+
 	/* lionsemi,ln8000 (charger) @ 51 */
 	/* awinic,aw8624 (haptics) @ 5a */
 	/* ti,bq2597x (charger) @ 66 */
