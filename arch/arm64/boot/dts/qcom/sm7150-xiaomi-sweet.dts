@@ -236,7 +236,7 @@
 			};
 
 			codec {
-				sound-dai = <&speaker_amp>;
+				sound-dai = <&speaker_amp>, <&bottom_speaker_amp>;
 			};
 		};
 	};
@@ -312,7 +312,7 @@
 	clock-frequency = <100000>;
 	status = "okay";
 
-	/* Speaker */
+	/* Top speaker */
         speaker_amp: audio-codec@34 {
 		compatible = "awinic,aw88263s";
 		reg = <0x34>;
@@ -330,8 +330,8 @@
 		#sound-dai-cells = <0>;
         };
 
-	/* Microphone */
-	mic_amp: audio-codec@35 {
+	/* Bottom speaker */
+	bottom_speaker_amp: audio-codec@35 {
 		compatible = "awinic,aw88263s";
 		reg = <0x35>;
 		firmware-name = "qcom/sm7150/xiaomi/sweet/aw882xx_pid_2032_acf.bin";
@@ -344,7 +344,7 @@
 		awinic,audio-channel = <1>;
 		awinic,sync-flag;
 
-		sound-name-prefix = "Microphone";
+		sound-name-prefix = "Bottom Speaker";
 		#sound-dai-cells = <0>;
         };
 };
