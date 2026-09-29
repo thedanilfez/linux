@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/regulator/willsemi,wl2866d.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Will Semiconductor WL2866D 4-Channel Camera PMIC
+
+maintainers:
+  - thedanilfez <thedanilfezlol@gmail.com>
+
+description: |
+  The WL2866D is an I2C controlled 4-channel LDO PMIC for camera
+  applications. It provides two DVDD LDOs (N-MOS pass device, powered from
+  VIN1 with VIN2 as bias) and two AVDD LDOs (P-MOS pass device, powered from
+  VIN2). Output voltage, enable state and active discharge are programmed
+  over I2C.
+
+  The active-high EN pin is a global force-on: asserting it powers every
+  output at its default voltage and overrides the I2C enable register, so it
+  must be deasserted for software control.
+
+properties:
+  compatible:
+    const: willsemi,wl2866d
+
+  reg:
+    maxItems: 1
+
+  vin1-supply:
+    description: Power supply for the DVDD1 and DVDD2 LDOs.
+
+  vin2-supply:
+    description: |
+      Power supply for the AVDD1 and AVDD2 LDOs, bias supply for the DVDD1
+      and DVDD2 LDOs, and supply for the control logic and I2C interface.
+
+  enable-gpios:
+    description: |
+      Active-high global EN pin. Asserting it forces all four outputs on at
+      their default voltages, therefore it is deasserted for I2C control. If
+      not present, EN is assumed to be tied low in hardware.
+    maxItems: 1
+
+  regulators:
+    type: object
+    additionalProperties: false
+    description: |
+      List of regulators provided by this controller, named after their
+      hardware counterparts.
+
+    patternProperties:
+      "^dvdd[12]$":
+        type: object
+        $ref: regulator.yaml#
+        unevaluatedProperties: false
+        description: DVDD LDO (0.6 V - 1.8 V, 6 mV step).
+
+      "^avdd[12]$":
+        type: object
+        $ref: regulator.yaml#
+        unevaluatedProperties: false
+        description: AVDD LDO (1.2 V - 4.3 V, 12.5 mV step).
+
+required:
+  - compatible
+  - reg
+  - regulators
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        regulator@28 {
+            compatible = "willsemi,wl2866d";
+            reg = <0x28>;
+
+            vin1-supply = <&vreg_s8c_1p35>;
+            vin2-supply = <&vreg_bob>;
+            enable-gpios = <&tlmm 30 GPIO_ACTIVE_HIGH>;
+
+            regulators {
+                dvdd1: dvdd1 {
+                    regulator-name = "wl2866d-dvdd1";
+                    regulator-min-microvolt = <1200000>;
+                    regulator-max-microvolt = <1200000>;
+                    regulator-active-discharge = <1>;
+                };
+
+                dvdd2: dvdd2 {
+                    regulator-name = "wl2866d-dvdd2";
+                    regulator-min-microvolt = <1050000>;
+                    regulator-max-microvolt = <1050000>;
+                    regulator-active-discharge = <1>;
+                };
+
+                avdd1: avdd1 {
+                    regulator-name = "wl2866d-avdd1";
+                    regulator-min-microvolt = <2800000>;
+                    regulator-max-microvolt = <2800000>;
+                    regulator-active-discharge = <1>;
+                };
+
+                avdd2: avdd2 {
+                    regulator-name = "wl2866d-avdd2";
+                    regulator-min-microvolt = <2700000>;
+                    regulator-max-microvolt = <2700000>;
+                    regulator-active-discharge = <1>;
+                };
+            };
+        };
+    };
+...
