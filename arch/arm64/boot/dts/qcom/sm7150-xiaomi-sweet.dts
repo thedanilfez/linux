@@ -7,6 +7,8 @@
 
 /dts-v1/;
 
+#include <dt-bindings/sound/qcom,q6voice.h>
+
 #include "sm7150-xiaomi-common.dtsi"
 
 /delete-node/ &wlan_msa_mem;
@@ -178,6 +180,10 @@
 		audio-routing = "AMIC1", "MIC BIAS1",
 				"AMIC2", "MIC BIAS2",
 				"AMIC3", "MIC BIAS3",
+				/* bolero RX macro -> WCD9375 analog inputs */
+				"IN1_HPHL", "HPHL_OUT",
+				"IN2_HPHR", "HPHR_OUT",
+				"IN3_AUX", "AUX_OUT",
 				"TX SWR_ADC0", "ADC1_OUTPUT",
 				"TX SWR_ADC2", "ADC2_OUTPUT";
 
@@ -192,6 +198,28 @@
 			link-name = "MultiMedia2";
 			cpu {
 				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
+			};
+		};
+
+		cs-voice-dai-link {
+			link-name = "CS-Voice";
+			cpu {
+				sound-dai = <&q6voicedai CS_VOICE>;
+			};
+		};
+
+		wcd-playback-dai-link {
+			link-name = "WCD Playback";
+			cpu {
+				sound-dai = <&q6afedai RX_CODEC_DMA_RX_0>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+
+			codec {
+				sound-dai = <&wcd9375 0>, <&swr1 0>, <&rxmacro 0>;
 			};
 		};
 

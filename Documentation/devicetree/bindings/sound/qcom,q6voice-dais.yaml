@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/qcom,q6voice-dais.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm Q6Voice Digital Audio Interface
+
+maintainers:
+  - Srinivas Kandagatla <srinivas.kandagatla@linaro.org>
+
+description:
+  The Q6Voice DAI is a control-only frontend that ties an ALSA PCM to the
+  QDSP6 Voice Services session (MVM/CVS/CVP). No audio samples cross the
+  application processor.
+
+properties:
+  compatible:
+    enum:
+      - qcom,q6voice-dais
+
+  "#sound-dai-cells":
+    const: 1
+
+required:
+  - compatible
+  - "#sound-dai-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    dais {
+        compatible = "qcom,q6voice-dais";
+        #sound-dai-cells = <1>;
+    };
