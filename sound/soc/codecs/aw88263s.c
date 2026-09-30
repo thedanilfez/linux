@@ -47,6 +47,9 @@ static unsigned int aw88263s_reg_to_db(unsigned int value)
 
 static int aw88263s_set_volume(struct aw88263s *aw88263s, unsigned int value)
 {
+	value = min(value + aw88263s->aw_pa->volume_desc.init_volume,
+		    (unsigned int)AW88263S_MUTE_VOL);
+
 	return regmap_update_bits(aw88263s->regmap, AW88263S_SYSCTRL2_REG,
 				 AW88263S_SYSCTRL2_VOL, aw88263s_db_to_reg(value));
 }
@@ -126,25 +129,8 @@ static int aw88263s_check_sysst(struct aw88263s *aw88263s)
 		usleep_range(2000, 2010);
 	}
 
-	return -ETIMEDOUT;
-}
-
-static int aw88263s_check_pll(struct aw88263s *aw88263s)
-{
-	unsigned int status;
-	int ret, i;
-
-	for (i = 0; i < AW88263S_SYSST_RETRIES; i++) {
-		ret = regmap_read(aw88263s->regmap, AW88263S_SYSST_REG, &status);
-		if (ret)
-			return ret;
-
-		if ((status & (AW88263S_SYSST_CLKS | AW88263S_SYSST_PLLS)) ==
-		    (AW88263S_SYSST_CLKS | AW88263S_SYSST_PLLS))
-			return 0;
-
-		usleep_range(2000, 2010);
-	}
+	dev_err(aw88263s->aw_pa->dev,
+		"SYSST not ready: status 0x%04x, need CLKS|PLLS\n", status);
 
 	return -ETIMEDOUT;
 }
@@ -232,7 +218,7 @@ static int aw88263s_start(struct aw88263s *aw88263s)
 			return ret;
 	}
 
-	ret = aw88263s_set_i2s_tx(aw88263s, false);
+	ret = aw88263s_set_i2s_tx(aw88263s, true);
 	if (ret)
 		return ret;
 
@@ -245,10 +231,6 @@ static int aw88263s_start(struct aw88263s *aw88263s)
 	if (ret)
 		goto power_down;
 
-	ret = aw88263s_check_pll(aw88263s);
-	if (ret)
-		goto power_down;
-
 	ret = aw88263s_set_amp_power_down(aw88263s, false);
 	if (ret)
 		goto power_down;
@@ -258,11 +240,7 @@ static int aw88263s_start(struct aw88263s *aw88263s)
 	if (ret)
 		goto amp_power_down;
 
-	ret = aw88263s_set_i2s_tx(aw88263s, true);
-	if (ret)
-		goto amp_power_down;
-
-	ret = aw88263s_set_mute(aw88263s, false);
+	ret = aw88263s_set_mute(aw88263s, aw88263s->mute_st);
 	if (ret)
 		goto tx_disable;
 
@@ -652,7 +630,7 @@ static int aw88263s_profile_get(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct aw88263s *aw88263s = snd_soc_component_get_drvdata(component);
 
-	ucontrol->value.integer.value[0] = aw88263s->aw_pa->prof_index;
+	ucontrol->value.enumerated.item[0] = aw88263s->aw_pa->prof_index;
 	return 0;
 }
 
@@ -664,11 +642,19 @@ static int aw88263s_profile_set(struct snd_kcontrol *kcontrol,
 	int ret;
 
 	mutex_lock(&aw88263s->lock);
+	if (ucontrol->value.enumerated.item[0] >= aw88263s->aw_pa->prof_info.count) {
+		mutex_unlock(&aw88263s->lock);
+		return -EINVAL;
+	}
 	ret = aw88395_dev_set_profile_index(aw88263s->aw_pa,
-			ucontrol->value.integer.value[0]);
-	if (ret == -EPERM)
-		ret = 0;
-	else if (!ret && aw88263s->aw_pa->status == AW88395_DEV_PW_ON) {
+			ucontrol->value.enumerated.item[0]);
+	if (ret) {
+		/* Index unchanged: nothing to reload. */
+		mutex_unlock(&aw88263s->lock);
+		return 0;
+	}
+
+	if (aw88263s->aw_pa->status == AW88395_DEV_PW_ON) {
 		ret = aw88263s_stop(aw88263s);
 		if (!ret)
 			ret = aw88263s_start(aw88263s);
@@ -706,11 +692,59 @@ static int aw88263s_volume_set(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 
 	value = AW88263S_CTL_MIN_ATTEN - (value * 2);
-	if (value == aw88263s->aw_pa->volume_desc.ctl_volume)
+	mutex_lock(&aw88263s->lock);
+	if (value == aw88263s->aw_pa->volume_desc.ctl_volume) {
+		mutex_unlock(&aw88263s->lock);
 		return 0;
+	}
+	/* Keep the hardware muted until Playback Switch enables this endpoint. */
+	if (aw88263s->aw_pa->status == AW88395_DEV_PW_ON && !aw88263s->mute_st) {
+		int ret = aw88263s_set_volume(aw88263s, value);
 
+		if (ret) {
+			mutex_unlock(&aw88263s->lock);
+			return ret;
+		}
+	}
 	aw88263s->aw_pa->volume_desc.ctl_volume = value;
-	return aw88263s_set_volume(aw88263s, value) ?: 1;
+	mutex_unlock(&aw88263s->lock);
+	return 1;
+}
+
+static int aw88263s_mute_get(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct aw88263s *aw88263s = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = !aw88263s->mute_st;
+	return 0;
+}
+
+static int aw88263s_mute_put(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct aw88263s *aw88263s = snd_soc_component_get_drvdata(component);
+	bool mute = !ucontrol->value.integer.value[0];
+	int ret;
+
+	mutex_lock(&aw88263s->lock);
+	if (aw88263s->mute_st == mute) {
+		mutex_unlock(&aw88263s->lock);
+		return 0;
+	}
+	if (aw88263s->aw_pa->status == AW88395_DEV_PW_ON) {
+		ret = aw88263s_set_mute(aw88263s, mute);
+		if (ret) {
+			mutex_unlock(&aw88263s->lock);
+			return ret;
+		}
+	}
+	aw88263s->mute_st = mute;
+	mutex_unlock(&aw88263s->lock);
+
+	return 1;
 }
 
 static const DECLARE_TLV_DB_SCALE(aw88263s_volume_tlv, -6000, 25, 0);
@@ -720,6 +754,8 @@ static const struct snd_kcontrol_new aw88263s_controls[] = {
 			   6, AW88263S_CTL_MAX_VOL, 1,
 			   aw88263s_volume_get, aw88263s_volume_set,
 			   aw88263s_volume_tlv),
+	SOC_SINGLE_EXT("Playback Switch", 0, 0, 1, 0,
+		       aw88263s_mute_get, aw88263s_mute_put),
 	AW88263S_PROFILE_EXT("Profile Set", aw88263s_profile_info,
 			     aw88263s_profile_get, aw88263s_profile_set),
 };
@@ -744,11 +780,16 @@ static int aw88263s_playback_event(struct snd_soc_dapm_widget *widget,
 	}
 	mutex_unlock(&aw88263s->lock);
 
+	if (ret)
+		dev_err(component->dev, "playback %s failed: %d\n",
+			event == SND_SOC_DAPM_PRE_PMU ? "power-up" : "power-down",
+			ret);
+
 	return ret;
 }
 
 static const struct snd_soc_dapm_widget aw88263s_dapm_widgets[] = {
-	SND_SOC_DAPM_AIF_IN_E("AIF_RX", "Speaker_Playback", 0, 0, 0, 0,
+	SND_SOC_DAPM_AIF_IN_E("AIF_RX", "Speaker_Playback", 0, SND_SOC_NOPM, 0, 0,
 				      aw88263s_playback_event,
 				      SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_OUTPUT("DAC Output"),
@@ -788,8 +829,6 @@ static int aw88263s_request_firmware(struct aw88263s *aw88263s)
 	container->len = firmware->size;
 	memcpy(container->data, firmware->data, firmware->size);
 	release_firmware(firmware);
-	aw88263s->aw_cfg = container;
-
 	ret = aw88395_dev_load_acf_check(aw88263s->aw_pa, container);
 	if (ret)
 		return ret;
@@ -800,7 +839,10 @@ static int aw88263s_request_firmware(struct aw88263s *aw88263s)
 
 	aw88263s->aw_pa->prof_index = 0;
 	aw88263s->aw_pa->prof_cur = 0;
-	return aw88263s_load_profile(aw88263s);
+	ret = aw88263s_load_profile(aw88263s);
+	if (!ret)
+		aw88263s->aw_cfg = container;
+	return ret;
 }
 
 static int aw88263s_component_probe(struct snd_soc_component *component)
@@ -809,7 +851,13 @@ static int aw88263s_component_probe(struct snd_soc_component *component)
 	struct aw88263s *aw88263s = snd_soc_component_get_drvdata(component);
 	int ret;
 
-	ret = aw88263s_request_firmware(aw88263s);
+	/* The I2C device survives an APR-driven card teardown/rebind. */
+	mutex_lock(&aw88263s->lock);
+	aw88263s->mute_st = true;
+	ret = aw88263s_stop(aw88263s);
+	if (!ret && !aw88263s->aw_cfg)
+		ret = aw88263s_request_firmware(aw88263s);
+	mutex_unlock(&aw88263s->lock);
 	if (ret)
 		return ret;
 
@@ -869,6 +917,7 @@ static int aw88263s_i2c_probe(struct i2c_client *i2c)
 					AW88263S_I2S_MODE_PHILIPS);
 	aw88263s->bck_inv_value = 0;
 	mutex_init(&aw88263s->lock);
+	aw88263s->mute_st = true;
 	i2c_set_clientdata(i2c, aw88263s);
 
 	ret = devm_regulator_get_enable_optional(&i2c->dev, "dvdd");

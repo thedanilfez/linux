@@ -10,6 +10,9 @@
 #include <linux/debugfs.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/of_platform.h>
+#include <linux/notifier.h>
+#include <linux/remoteproc/qcom_rproc.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
@@ -222,6 +225,9 @@ struct qcom_swrm_ctrl {
 	u32 slave_status;
 	u32 wr_fifo_depth;
 	bool clock_stop_not_supported;
+	bool removing;
+	struct notifier_block ssr_nb;
+	void *ssr_cookie;
 };
 
 struct qcom_swrm_data {
@@ -371,6 +377,10 @@ static int qcom_swrm_ahb_reg_write(struct qcom_swrm_ctrl *ctrl,
 static int qcom_swrm_cpu_reg_read(struct qcom_swrm_ctrl *ctrl, int reg,
 				  u32 *val)
 {
+	if (READ_ONCE(ctrl->removing)) {
+		*val = 0;
+		return SDW_CMD_FAIL;
+	}
 	*val = readl(ctrl->mmio + reg);
 	return SDW_CMD_OK;
 }
@@ -378,6 +388,8 @@ static int qcom_swrm_cpu_reg_read(struct qcom_swrm_ctrl *ctrl, int reg,
 static int qcom_swrm_cpu_reg_write(struct qcom_swrm_ctrl *ctrl, int reg,
 				   int val)
 {
+	if (READ_ONCE(ctrl->removing))
+		return SDW_CMD_FAIL;
 	writel(val, ctrl->mmio + reg);
 	return SDW_CMD_OK;
 }
@@ -976,6 +988,9 @@ static enum sdw_command_response qcom_swrm_xfer_msg(struct sdw_bus *bus,
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
 	int ret, i, len;
 
+	if (READ_ONCE(ctrl->removing))
+		return SDW_CMD_FAIL;
+
 	if (msg->flags == SDW_MSG_FLAG_READ) {
 		for (i = 0; i < msg->len;) {
 			len = min(msg->len - i, QCOM_SWRM_MAX_RD_LEN);
@@ -1530,6 +1545,88 @@ static int swrm_reg_show(struct seq_file *s_file, void *data)
 DEFINE_SHOW_ATTRIBUTE(swrm_reg);
 #endif
 
+static int qcom_swrm_ssr_notify(struct notifier_block *nb,
+				unsigned long event, void *data)
+{
+	struct qcom_swrm_ctrl *ctrl = container_of(nb, struct qcom_swrm_ctrl, ssr_nb);
+
+	if (event == QCOM_SSR_BEFORE_SHUTDOWN) {
+		WRITE_ONCE(ctrl->removing, true);
+		disable_irq_nosync(ctrl->irq);
+		if (ctrl->wake_irq > 0)
+			disable_irq_nosync(ctrl->wake_irq);
+	}
+	/* Managed supplier links re-probe this controller with the new clocks. */
+	return NOTIFY_OK;
+}
+
+static void qcom_swrm_ssr_unregister(void *data)
+{
+	struct qcom_swrm_ctrl *ctrl = data;
+
+	qcom_unregister_ssr_notifier(ctrl->ssr_cookie, &ctrl->ssr_nb);
+}
+
+static int qcom_swrm_register_ssr(struct qcom_swrm_ctrl *ctrl)
+{
+	struct of_phandle_args iface, parent;
+	bool adsp;
+	int ret;
+
+	if (!IS_REACHABLE(CONFIG_QCOM_RPROC_COMMON))
+		return 0;
+	/* Only controllers behind an APR-backed LPASS macro lose access on SSR. */
+	ret = of_parse_phandle_with_args(ctrl->dev->of_node, "clocks",
+					"#clock-cells", 0, &iface);
+	if (ret)
+		return ret;
+	ret = of_parse_phandle_with_args(iface.np, "clocks",
+					"#clock-cells", 0, &parent);
+	of_node_put(iface.np);
+	if (ret)
+		return 0;
+	adsp = of_device_is_compatible(parent.np, "qcom,q6afe-clocks");
+	of_node_put(parent.np);
+	if (!adsp)
+		return 0;
+	ctrl->ssr_nb.notifier_call = qcom_swrm_ssr_notify;
+	ctrl->ssr_cookie = qcom_register_ssr_notifier("adsp", &ctrl->ssr_nb);
+	if (IS_ERR(ctrl->ssr_cookie))
+		return PTR_ERR(ctrl->ssr_cookie);
+	return devm_add_action_or_reset(ctrl->dev, qcom_swrm_ssr_unregister, ctrl);
+}
+
+static int qcom_swrm_link_macro(struct device *dev)
+{
+	struct of_phandle_args args;
+	struct platform_device *macro;
+	struct device_link *link;
+	int ret;
+
+	ret = of_parse_phandle_with_args(dev->of_node, "clocks", "#clock-cells",
+					0, &args);
+	if (ret)
+		return ret;
+	/* Slimbus/GCC-backed controllers do not have an LPASS macro supplier. */
+	if (!of_property_present(args.np, "#sound-dai-cells")) {
+		of_node_put(args.np);
+		return 0;
+	}
+	macro = of_find_device_by_node(args.np);
+	of_node_put(args.np);
+	if (!macro)
+		return -EPROBE_DEFER;
+	if (!device_is_bound(&macro->dev)) {
+		put_device(&macro->dev);
+		return -EPROBE_DEFER;
+	}
+	link = device_link_add(dev, &macro->dev,
+			      DL_FLAG_AUTOREMOVE_CONSUMER | DL_FLAG_PM_RUNTIME |
+			      DL_FLAG_RPM_ACTIVE);
+	put_device(&macro->dev);
+	return link ? 0 : -EINVAL;
+}
+
 static int qcom_swrm_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1539,6 +1636,10 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	const struct qcom_swrm_data *data;
 	int ret;
 	u32 val;
+
+	ret = qcom_swrm_link_macro(dev);
+	if (ret)
+		return ret;
 
 	ctrl = devm_kzalloc(dev, sizeof(*ctrl), GFP_KERNEL);
 	if (!ctrl)
@@ -1588,7 +1689,9 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		goto err_init;
 	}
 
-	clk_prepare_enable(ctrl->hclk);
+	ret = clk_prepare_enable(ctrl->hclk);
+	if (ret)
+		return ret;
 
 	ctrl->dev = dev;
 	dev_set_drvdata(&pdev->dev, ctrl);
@@ -1663,6 +1766,9 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	qcom_swrm_init(ctrl);
 	wait_for_completion_timeout(&ctrl->enumeration,
 				    msecs_to_jiffies(TIMEOUT_MS));
+	ret = qcom_swrm_register_ssr(ctrl);
+	if (ret)
+		goto err_master_add;
 	ret = qcom_swrm_register_dais(ctrl);
 	if (ret)
 		goto err_master_add;
@@ -1697,8 +1803,16 @@ static void qcom_swrm_remove(struct platform_device *pdev)
 {
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
 
+	/* Teardown may follow DSP power loss; no MMIO is safe after this point. */
+	disable_irq(ctrl->irq);
+	if (ctrl->wake_irq > 0)
+		disable_irq(ctrl->wake_irq);
+	WRITE_ONCE(ctrl->removing, true);
+	pm_runtime_disable(ctrl->dev);
 	sdw_bus_master_delete(&ctrl->bus);
-	clk_disable_unprepare(ctrl->hclk);
+	if (!pm_runtime_status_suspended(ctrl->dev))
+		clk_disable_unprepare(ctrl->hclk);
+	pm_runtime_set_suspended(ctrl->dev);
 }
 
 static int __maybe_unused swrm_runtime_resume(struct device *dev)
@@ -1706,12 +1820,17 @@ static int __maybe_unused swrm_runtime_resume(struct device *dev)
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dev);
 	int ret;
 
+	if (READ_ONCE(ctrl->removing))
+		return -EHOSTDOWN;
+
 	if (ctrl->wake_irq > 0) {
 		if (!irqd_irq_disabled(irq_get_irq_data(ctrl->wake_irq)))
 			disable_irq_nosync(ctrl->wake_irq);
 	}
 
-	clk_prepare_enable(ctrl->hclk);
+	ret = clk_prepare_enable(ctrl->hclk);
+	if (ret)
+		return ret;
 
 	if (ctrl->clock_stop_not_supported) {
 		reinit_completion(&ctrl->enumeration);
@@ -1770,6 +1889,11 @@ static int __maybe_unused swrm_runtime_suspend(struct device *dev)
 {
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dev);
 	int ret;
+
+	if (READ_ONCE(ctrl->removing)) {
+		clk_disable_unprepare(ctrl->hclk);
+		return 0;
+	}
 
 	swrm_wait_for_wr_fifo_done(ctrl);
 	if (!ctrl->clock_stop_not_supported) {

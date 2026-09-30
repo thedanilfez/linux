@@ -32,6 +32,61 @@ struct q6afe_dai_data {
 	struct q6afe_port_config port_config[AFE_PORT_MAX];
 	bool is_port_started[AFE_PORT_MAX];
 	struct q6afe_dai_priv_data priv[AFE_PORT_MAX];
+	bool awinic_rx_enabled;
+	bool awinic_rx_configured;
+};
+
+/* Awinic speaker processing lives in the AFE, independently of CVP/ADM. */
+#define AFE_MODULE_ID_AWINIC_RX		0x10013d01
+#define AFE_PARAM_ID_AWINIC_RX_ENABLE	0x10013d11
+
+static int q6afe_awinic_rx_enable(struct q6afe_dai_data *data, bool enable)
+{
+	u32 value = enable;
+
+	return q6afe_port_set_param_v2(data->port[PRIMARY_MI2S_RX], &value,
+			AFE_PARAM_ID_AWINIC_RX_ENABLE, AFE_MODULE_ID_AWINIC_RX,
+			sizeof(value));
+}
+
+static int q6afe_awinic_rx_get(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
+	struct q6afe_dai_data *data = snd_soc_component_get_drvdata(c);
+
+	ucontrol->value.integer.value[0] = data->awinic_rx_enabled;
+	return 0;
+}
+
+static int q6afe_awinic_rx_put(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
+	struct q6afe_dai_data *data = snd_soc_component_get_drvdata(c);
+	bool enable = !!ucontrol->value.integer.value[0];
+	int ret = 0;
+
+	/* Serialize with backend prepare/shutdown and replay on each prepare. */
+	snd_soc_dpcm_mutex_lock(c->card);
+	if (data->awinic_rx_configured && enable == data->awinic_rx_enabled)
+		goto out;
+	if (data->is_port_started[PRIMARY_MI2S_RX]) {
+		ret = q6afe_awinic_rx_enable(data, enable);
+		if (ret)
+			goto out;
+	}
+	data->awinic_rx_enabled = enable;
+	data->awinic_rx_configured = true;
+	ret = 1;
+out:
+	snd_soc_dpcm_mutex_unlock(c->card);
+	return ret;
+}
+
+static const struct snd_kcontrol_new q6afe_dai_controls[] = {
+	SOC_SINGLE_BOOL_EXT("PRI_MI2S_RX Awinic RX Switch", 0,
+			    q6afe_awinic_rx_get, q6afe_awinic_rx_put),
 };
 
 static int q6slim_hw_params(struct snd_pcm_substream *substream,
@@ -442,6 +497,14 @@ static int q6afe_dai_prepare(struct snd_pcm_substream *substream,
 		return rc;
 	}
 	dai_data->is_port_started[dai->id] = true;
+	if (dai->id == PRIMARY_MI2S_RX && dai_data->awinic_rx_configured) {
+		rc = q6afe_awinic_rx_enable(dai_data, dai_data->awinic_rx_enabled);
+		if (rc) {
+			q6afe_port_stop(dai_data->port[dai->id]);
+			dai_data->is_port_started[dai->id] = false;
+			return rc;
+		}
+	}
 
 	return 0;
 }
@@ -1015,6 +1078,8 @@ static const struct snd_soc_dapm_widget q6afe_dai_widgets[] = {
 
 static const struct snd_soc_component_driver q6afe_dai_component = {
 	.name		= "q6afe-dai-component",
+	.controls = q6afe_dai_controls,
+	.num_controls = ARRAY_SIZE(q6afe_dai_controls),
 	.dapm_widgets = q6afe_dai_widgets,
 	.num_dapm_widgets = ARRAY_SIZE(q6afe_dai_widgets),
 	.dapm_routes = q6afe_dapm_routes,

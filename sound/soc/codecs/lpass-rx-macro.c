@@ -636,6 +636,7 @@ enum {
 };
 
 struct rx_macro {
+	struct lpass_macro_ssr *ssr;
 	struct device *dev;
 	int comp_enabled[RX_MACRO_COMP_MAX];
 	/* Main path clock users count */
@@ -2079,7 +2080,11 @@ static int rx_macro_mclk_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		ret = lpass_macro_ssr_lock(rx->ssr);
+		if (ret)
+			return ret;
 		rx_macro_mclk_enable(rx, true);
+		lpass_macro_ssr_unlock(rx->ssr);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		rx_macro_mclk_enable(rx, false);
@@ -3671,9 +3676,18 @@ static int swclk_gate_enable(struct clk_hw *hw)
 	struct rx_macro *rx = to_rx_macro(hw);
 	int ret;
 
+	if (lpass_macro_is_ssr_down(rx->ssr))
+		return -EHOSTDOWN;
+
 	ret = clk_prepare_enable(rx->mclk);
 	if (ret) {
 		dev_err(rx->dev, "unable to prepare mclk\n");
+		return ret;
+	}
+
+	ret = lpass_macro_ssr_lock(rx->ssr);
+	if (ret) {
+		clk_disable_unprepare(rx->mclk);
 		return ret;
 	}
 
@@ -3682,6 +3696,7 @@ static int swclk_gate_enable(struct clk_hw *hw)
 	regmap_update_bits(rx->regmap, CDC_RX_CLK_RST_CTRL_SWR_CONTROL,
 			   CDC_RX_SWR_CLK_EN_MASK, 1);
 
+	lpass_macro_ssr_unlock(rx->ssr);
 	return 0;
 }
 
@@ -3859,6 +3874,10 @@ static int rx_macro_probe(struct platform_device *pdev)
 	if (IS_ERR(rx->regmap))
 		return PTR_ERR(rx->regmap);
 
+	rx->ssr = lpass_macro_regmap_register_ssr(dev, rx->regmap);
+	if (IS_ERR(rx->ssr))
+		return PTR_ERR(rx->ssr);
+
 	dev_set_drvdata(dev, rx);
 
 	rx->dev = dev;
@@ -3933,13 +3952,20 @@ err_dcodec:
 
 static void rx_macro_remove(struct platform_device *pdev)
 {
-	struct rx_macro *rx = dev_get_drvdata(&pdev->dev);
+	struct device *dev = &pdev->dev;
+	struct rx_macro *rx = dev_get_drvdata(dev);
 
-	clk_disable_unprepare(rx->mclk);
-	clk_disable_unprepare(rx->npl);
-	clk_disable_unprepare(rx->fsgen);
-	clk_disable_unprepare(rx->macro);
+	pm_runtime_disable(dev);
+	regcache_cache_only(rx->regmap, true);
+	snd_soc_unregister_component(dev);
+	if (!pm_runtime_status_suspended(dev)) {
+		clk_disable_unprepare(rx->fsgen);
+		clk_disable_unprepare(rx->npl);
+		clk_disable_unprepare(rx->mclk);
+	}
+	pm_runtime_set_suspended(dev);
 	clk_disable_unprepare(rx->dcodec);
+	clk_disable_unprepare(rx->macro);
 }
 
 static const struct of_device_id rx_macro_dt_match[] = {
@@ -3985,32 +4011,35 @@ static int rx_macro_runtime_resume(struct device *dev)
 	struct rx_macro *rx = dev_get_drvdata(dev);
 	int ret;
 
+	if (lpass_macro_is_ssr_down(rx->ssr))
+		return -EHOSTDOWN;
 	ret = clk_prepare_enable(rx->mclk);
-	if (ret) {
-		dev_err(dev, "unable to prepare mclk\n");
+	if (ret)
 		return ret;
-	}
-
 	ret = clk_prepare_enable(rx->npl);
-	if (ret) {
-		dev_err(dev, "unable to prepare mclkx2\n");
+	if (ret)
 		goto err_npl;
-	}
-
 	ret = clk_prepare_enable(rx->fsgen);
-	if (ret) {
-		dev_err(dev, "unable to prepare fsgen\n");
+	if (ret)
 		goto err_fsgen;
-	}
-	regcache_cache_only(rx->regmap, false);
-	regcache_sync(rx->regmap);
 
-	return 0;
+	/* Gate prepares also lock SSR state; acquire it after CCF calls. */
+	ret = lpass_macro_ssr_lock(rx->ssr);
+	if (ret)
+		goto err_sync;
+	regcache_cache_only(rx->regmap, false);
+	ret = regcache_sync(rx->regmap);
+	if (ret)
+		regcache_cache_only(rx->regmap, true);
+	lpass_macro_ssr_unlock(rx->ssr);
+	if (!ret)
+		return 0;
+err_sync:
+	clk_disable_unprepare(rx->fsgen);
 err_fsgen:
 	clk_disable_unprepare(rx->npl);
 err_npl:
 	clk_disable_unprepare(rx->mclk);
-
 	return ret;
 }
 

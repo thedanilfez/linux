@@ -3,6 +3,7 @@
 
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
@@ -66,57 +67,91 @@ static int sm8250_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 
 	rate->min = rate->max = 48000;
 	channels->min = channels->max = 2;
+	/* WCD9375 sends the enabled decimators, not an unconditional stereo pair. */
+	if (of_machine_is_compatible("xiaomi,sweet") &&
+	    snd_soc_rtd_to_cpu(rtd, 0)->id == TX_CODEC_DMA_TX_3) {
+		struct snd_soc_dai *codec_dai;
+		unsigned int tx_num = 0, rx_num = 0;
+		unsigned int tx_slot[32] = {}, rx_slot[32] = {};
+		int i, ret;
+
+		for_each_rtd_codec_dais(rtd, i, codec_dai) {
+			ret = snd_soc_dai_get_channel_map(codec_dai, &tx_num, tx_slot,
+							 &rx_num, rx_slot);
+			if (ret && ret != -ENOTSUPP)
+				return ret;
+		}
+		if (tx_num) {
+			channels->min = channels->max = tx_num;
+			ret = snd_soc_dai_set_channel_map(snd_soc_rtd_to_cpu(rtd, 0),
+							tx_num, tx_slot, 0, NULL);
+			if (ret)
+				return ret;
+		}
+	}
+	snd_mask_none(fmt);
 	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
 
 	return 0;
 }
 
+static int sm8250_mi2s_clock(unsigned int id)
+{
+	switch (id) {
+	case PRIMARY_MI2S_RX:
+		return Q6AFE_LPASS_CLK_ID_PRI_MI2S_IBIT;
+	case SECONDARY_MI2S_RX:
+		return Q6AFE_LPASS_CLK_ID_SEC_MI2S_IBIT;
+	case TERTIARY_MI2S_RX:
+		return Q6AFE_LPASS_CLK_ID_TER_MI2S_IBIT;
+	case QUINARY_MI2S_RX:
+		return Q6AFE_LPASS_CLK_ID_QUI_MI2S_IBIT;
+	default:
+		return -1;
+	}
+}
+
 static int sm8250_snd_startup(struct snd_pcm_substream *substream)
 {
-	unsigned int fmt = SND_SOC_DAIFMT_BP_FP;
-	unsigned int codec_dai_fmt = SND_SOC_DAIFMT_BC_FC;
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
-	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *codec_dai;
+	unsigned int codec_fmt = SND_SOC_DAIFMT_BC_FC |
+		SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
+	int clk = sm8250_mi2s_clock(cpu_dai->id);
+	int i, ret;
 
-	switch (cpu_dai->id) {
-	case PRIMARY_MI2S_RX:
-		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
-		snd_soc_dai_set_sysclk(cpu_dai,
-			Q6AFE_LPASS_CLK_ID_PRI_MI2S_IBIT,
-			MI2S_BCLK_RATE, SNDRV_PCM_STREAM_PLAYBACK);
-		snd_soc_dai_set_fmt(cpu_dai, fmt);
-		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
-		break;
-	case SECONDARY_MI2S_RX:
-		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
-		snd_soc_dai_set_sysclk(cpu_dai,
-			Q6AFE_LPASS_CLK_ID_SEC_MI2S_IBIT,
-			MI2S_BCLK_RATE, SNDRV_PCM_STREAM_PLAYBACK);
-		snd_soc_dai_set_fmt(cpu_dai, fmt);
-		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
-		break;
-	case TERTIARY_MI2S_RX:
-		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
-		snd_soc_dai_set_sysclk(cpu_dai,
-			Q6AFE_LPASS_CLK_ID_TER_MI2S_IBIT,
-			MI2S_BCLK_RATE, SNDRV_PCM_STREAM_PLAYBACK);
-		snd_soc_dai_set_fmt(cpu_dai, fmt);
-		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
-		break;
-	case QUINARY_MI2S_RX:
-		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
-		snd_soc_dai_set_sysclk(cpu_dai,
-			Q6AFE_LPASS_CLK_ID_QUI_MI2S_IBIT,
-			MI2S_BCLK_RATE, SNDRV_PCM_STREAM_PLAYBACK);
-		snd_soc_dai_set_fmt(cpu_dai, fmt);
-		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
-		break;
-	default:
-		break;
+	if (clk < 0)
+		return qcom_snd_sdw_startup(substream);
+
+	ret = snd_soc_dai_set_sysclk(cpu_dai, clk, MI2S_BCLK_RATE,
+				     SNDRV_PCM_STREAM_PLAYBACK);
+	if (ret)
+		return ret;
+	ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_BP_FP);
+	if (ret)
+		goto disable_clock;
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		ret = snd_soc_dai_set_fmt(codec_dai, codec_fmt);
+		if (ret && ret != -ENOTSUPP)
+			goto disable_clock;
 	}
+	return 0;
 
-	return qcom_snd_sdw_startup(substream);
+disable_clock:
+	snd_soc_dai_set_sysclk(cpu_dai, clk, 0, SNDRV_PCM_STREAM_PLAYBACK);
+	return ret;
+}
+
+static void sm8250_snd_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	int clk = sm8250_mi2s_clock(cpu_dai->id);
+
+	if (clk >= 0)
+		snd_soc_dai_set_sysclk(cpu_dai, clk, 0, SNDRV_PCM_STREAM_PLAYBACK);
+	qcom_snd_sdw_shutdown(substream);
 }
 
 static int sm8250_snd_prepare(struct snd_pcm_substream *substream)
@@ -139,7 +174,7 @@ static int sm8250_snd_hw_free(struct snd_pcm_substream *substream)
 
 static const struct snd_soc_ops sm8250_be_ops = {
 	.startup = sm8250_snd_startup,
-	.shutdown = qcom_snd_sdw_shutdown,
+	.shutdown = sm8250_snd_shutdown,
 	.hw_free = sm8250_snd_hw_free,
 	.prepare = sm8250_snd_prepare,
 };

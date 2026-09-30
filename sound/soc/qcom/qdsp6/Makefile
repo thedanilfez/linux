@@ -12,6 +12,12 @@ obj-$(CONFIG_SND_SOC_QDSP6_ROUTING) += q6routing.o
 obj-$(CONFIG_SND_SOC_QDSP6_ASM) += q6asm.o
 obj-$(CONFIG_SND_SOC_QDSP6_ASM_DAI) += q6asm-dai.o
 
+obj-$(CONFIG_SND_SOC_QDSP6_Q6VOICE) += q6voice-common.o q6mvm.o q6cvs.o q6cvp.o
+obj-$(CONFIG_SND_SOC_QDSP6_Q6VOICE) += q6voice.o
+obj-$(CONFIG_SND_SOC_QDSP6_Q6VOICE_DAI) += q6voice-dai.o
+# q6voice-trace.h is located with <trace/define_trace.h>
+CFLAGS_q6voice-common.o := -I$(src)
+
 obj-$(CONFIG_SND_SOC_QDSP6_APM) += snd-q6apm.o
 obj-$(CONFIG_SND_SOC_QDSP6_APM_DAI) += q6apm-dai.o
 obj-$(CONFIG_SND_SOC_QDSP6_APM_LPASS_DAI) += q6apm-lpass-dais.o
