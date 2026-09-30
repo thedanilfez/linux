@@ -38,6 +38,13 @@ struct lpass_macro {
 };
 
 struct lpass_macro *lpass_macro_pds_init(struct device *dev);
+struct regmap;
+struct lpass_macro_ssr;
+struct lpass_macro_ssr *
+lpass_macro_regmap_register_ssr(struct device *dev, struct regmap *regmap);
+bool lpass_macro_is_ssr_down(struct lpass_macro_ssr *ssr);
+int lpass_macro_ssr_lock(struct lpass_macro_ssr *ssr);
+void lpass_macro_ssr_unlock(struct lpass_macro_ssr *ssr);
 void lpass_macro_pds_exit(struct lpass_macro *pds);
 void lpass_macro_set_codec_version(enum lpass_codec_version version);
 enum lpass_codec_version lpass_macro_get_codec_version(void);

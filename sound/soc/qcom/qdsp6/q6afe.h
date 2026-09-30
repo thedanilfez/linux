@@ -264,6 +264,8 @@ void q6afe_cdc_dma_port_prepare(struct q6afe_port *port,
 				struct q6afe_cdc_dma_cfg *cfg);
 
 int afe_port_send_usb_dev_param(struct q6afe_port *port, int cardidx, int pcmidx);
+int q6afe_port_set_param_v2(struct q6afe_port *port, void *data,
+			  int param_id, int module_id, int psize);
 int q6afe_port_set_sysclk(struct q6afe_port *port, int clk_id,
 			  int clk_src, int clk_root,
 			  unsigned int freq, int dir);

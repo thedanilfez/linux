@@ -1,15 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Awinic AW88263S register definitions
- *
- * The register layout is based on the AW88263S datasheet, revision 1.3,
- * and the vendor AW_PID_2032_REG_H definitions.
  */
 
 #ifndef __AW88263S_H__
 #define __AW88263S_H__
 
 #include <linux/bits.h>
+#include <linux/types.h>
 
 #define AW88263S_CHIP_ID			0x2032
 
@@ -38,9 +36,8 @@
 #define AW88263S_SYSST_OCDS			BIT(3)
 #define AW88263S_SYSST_OTHS			BIT(1)
 #define AW88263S_SYSST_PLLS			BIT(0)
-#define AW88263S_SYSST_CHECK			(AW88263S_SYSST_BSTS | \
-						 AW88263S_SYSST_SWS | \
-						 AW88263S_SYSST_CLKS | \
+
+#define AW88263S_SYSST_CHECK			(AW88263S_SYSST_CLKS | \
 						 AW88263S_SYSST_PLLS)
 #define AW88263S_SYSST_FAULTS			(BIT(15) | BIT(14) | BIT(11) | \
 						 BIT(10) | AW88263S_SYSST_NOCLKS | \
@@ -119,6 +116,8 @@ struct aw88263s {
 	struct gpio_desc *reset_gpio;
 	struct regmap *regmap;
 	struct aw_container *aw_cfg;
+
+	bool mute_st;
 
 	unsigned int sr_value;
 	unsigned int cco_mux_value;

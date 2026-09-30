@@ -2652,8 +2652,6 @@ static int wcd937x_soc_codec_probe(struct snd_soc_component *component)
 	for (i = 0; i < wcd937x_regmap_irq_chip.num_regs; i++)
 		regmap_write(wcd937x->regmap, (WCD937X_DIGITAL_INTR_LEVEL_0 + i), 0);
 
-	pm_runtime_put(dev);
-
 	wcd937x->hphr_pdm_wd_int = regmap_irq_get_virq(wcd937x->irq_chip,
 						       WCD937X_IRQ_HPHR_PDM_WD_INT);
 	wcd937x->hphl_pdm_wd_int = regmap_irq_get_virq(wcd937x->irq_chip,
@@ -2687,6 +2685,9 @@ static int wcd937x_soc_codec_probe(struct snd_soc_component *component)
 		goto err_free_resources;
 	}
 
+	/* IRQ/MBHC setup above also uses SoundWire's no-PM register accesses. */
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 	return 0;
 
 err_free_resources:
@@ -2694,6 +2695,7 @@ err_free_resources:
 err_free_clsh:
 	wcd_clsh_ctrl_free(wcd937x->clsh_info);
 	wcd937x->clsh_info = NULL;
+	pm_runtime_put(dev);
 	return ret;
 }
 

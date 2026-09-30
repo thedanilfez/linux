@@ -264,6 +264,7 @@ struct tx_macro_data {
 };
 
 struct tx_macro {
+	struct lpass_macro_ssr *ssr;
 	struct device *dev;
 	const struct tx_macro_data *data;
 	struct snd_soc_component *component;
@@ -271,7 +272,6 @@ struct tx_macro {
 	struct tx_mute_work tx_mute_dwork[NUM_DECIMATORS];
 	unsigned long active_ch_mask[TX_MACRO_MAX_DAIS];
 	unsigned long active_ch_cnt[TX_MACRO_MAX_DAIS];
-	int active_decimator[TX_MACRO_MAX_DAIS];
 	struct regmap *regmap;
 	struct clk *mclk;
 	struct clk *npl;
@@ -736,10 +736,15 @@ static int tx_macro_mclk_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 	struct tx_macro *tx = snd_soc_component_get_drvdata(component);
+	int ret;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		ret = lpass_macro_ssr_lock(tx->ssr);
+		if (ret)
+			return ret;
 		tx_macro_mclk_enable(tx, true);
+		lpass_macro_ssr_unlock(tx->ssr);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		tx_macro_mclk_enable(tx, false);
@@ -887,19 +892,17 @@ static int tx_macro_tx_mixer_put(struct snd_kcontrol *kcontrol,
 	struct tx_macro *tx = snd_soc_component_get_drvdata(component);
 
 	if (enable) {
-		if (tx->active_decimator[dai_id] == dec_id)
+		if (test_bit(dec_id, &tx->active_ch_mask[dai_id]))
 			return 0;
 
 		set_bit(dec_id, &tx->active_ch_mask[dai_id]);
 		tx->active_ch_cnt[dai_id]++;
-		tx->active_decimator[dai_id] = dec_id;
 	} else {
-		if (tx->active_decimator[dai_id] == -1)
+		if (!test_bit(dec_id, &tx->active_ch_mask[dai_id]))
 			return 0;
 
 		tx->active_ch_cnt[dai_id]--;
 		clear_bit(dec_id, &tx->active_ch_mask[dai_id]);
-		tx->active_decimator[dai_id] = -1;
 	}
 	snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, enable, update);
 
@@ -1192,20 +1195,9 @@ static int tx_macro_digital_mute(struct snd_soc_dai *dai, int mute, int stream)
 	struct tx_macro *tx = snd_soc_component_get_drvdata(component);
 	u8 decimator;
 
-	/* active decimator not set yet */
-	if (tx->active_decimator[dai->id] == -1)
-		return 0;
-
-	decimator = tx->active_decimator[dai->id];
-
-	if (mute)
-		snd_soc_component_write_field(component,
-					      CDC_TXn_TX_PATH_CTL(decimator),
-					      CDC_TXn_PGA_MUTE_MASK, 0x1);
-	else
-		snd_soc_component_update_bits(component,
-					      CDC_TXn_TX_PATH_CTL(decimator),
-					      CDC_TXn_PGA_MUTE_MASK, 0x0);
+	for_each_set_bit(decimator, &tx->active_ch_mask[dai->id], TX_MACRO_DEC_MAX)
+		snd_soc_component_write_field(component, CDC_TXn_TX_PATH_CTL(decimator),
+					      CDC_TXn_PGA_MUTE_MASK, !!mute);
 
 	return 0;
 }
@@ -2143,15 +2135,36 @@ static int tx_macro_component_probe(struct snd_soc_component *comp)
 	return 0;
 }
 
+static void tx_macro_component_remove(struct snd_soc_component *comp)
+{
+	struct tx_macro *tx = snd_soc_component_get_drvdata(comp);
+	int i;
+
+	for (i = 0; i < NUM_DECIMATORS; i++) {
+		cancel_delayed_work_sync(&tx->tx_hpf_work[i].dwork);
+		cancel_delayed_work_sync(&tx->tx_mute_dwork[i].dwork);
+	}
+	tx->component = NULL;
+}
+
 static int swclk_gate_enable(struct clk_hw *hw)
 {
 	struct tx_macro *tx = to_tx_macro(hw);
 	struct regmap *regmap = tx->regmap;
 	int ret;
 
+	if (lpass_macro_is_ssr_down(tx->ssr))
+		return -EHOSTDOWN;
+
 	ret = clk_prepare_enable(tx->mclk);
 	if (ret) {
 		dev_err(tx->dev, "failed to enable mclk\n");
+		return ret;
+	}
+
+	ret = lpass_macro_ssr_lock(tx->ssr);
+	if (ret) {
+		clk_disable_unprepare(tx->mclk);
 		return ret;
 	}
 
@@ -2160,6 +2173,7 @@ static int swclk_gate_enable(struct clk_hw *hw)
 	regmap_update_bits(regmap, CDC_TX_CLK_RST_CTRL_SWR_CONTROL,
 			   CDC_TX_SWR_CLK_EN_MASK,
 			   CDC_TX_SWR_CLK_ENABLE);
+	lpass_macro_ssr_unlock(tx->ssr);
 	return 0;
 }
 
@@ -2231,6 +2245,7 @@ static int tx_macro_register_mclk_output(struct tx_macro *tx)
 static const struct snd_soc_component_driver tx_macro_component_drv = {
 	.name = "TX-MACRO",
 	.probe = tx_macro_component_probe,
+	.remove = tx_macro_component_remove,
 	.controls = tx_macro_snd_controls,
 	.num_controls = ARRAY_SIZE(tx_macro_snd_controls),
 	.dapm_widgets = tx_macro_dapm_widgets,
@@ -2305,14 +2320,17 @@ static int tx_macro_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	tx->ssr = lpass_macro_regmap_register_ssr(dev, tx->regmap);
+	if (IS_ERR(tx->ssr)) {
+		ret = PTR_ERR(tx->ssr);
+		goto err;
+	}
+
 	dev_set_drvdata(dev, tx);
 
 	tx->dev = dev;
 
-	/* Set active_decimator default value */
-	tx->active_decimator[TX_MACRO_AIF1_CAP] = -1;
-	tx->active_decimator[TX_MACRO_AIF2_CAP] = -1;
-	tx->active_decimator[TX_MACRO_AIF3_CAP] = -1;
+
 
 	/* set MCLK and NPL rates */
 	clk_set_rate(tx->mclk, MCLK_FREQ);
@@ -2388,14 +2406,20 @@ err:
 
 static void tx_macro_remove(struct platform_device *pdev)
 {
-	struct tx_macro *tx = dev_get_drvdata(&pdev->dev);
+	struct device *dev = &pdev->dev;
+	struct tx_macro *tx = dev_get_drvdata(dev);
 
-	clk_disable_unprepare(tx->macro);
+	pm_runtime_disable(dev);
+	regcache_cache_only(tx->regmap, true);
+	snd_soc_unregister_component(dev);
+	if (!pm_runtime_status_suspended(dev)) {
+		clk_disable_unprepare(tx->fsgen);
+		clk_disable_unprepare(tx->npl);
+		clk_disable_unprepare(tx->mclk);
+	}
+	pm_runtime_set_suspended(dev);
 	clk_disable_unprepare(tx->dcodec);
-	clk_disable_unprepare(tx->mclk);
-	clk_disable_unprepare(tx->npl);
-	clk_disable_unprepare(tx->fsgen);
-
+	clk_disable_unprepare(tx->macro);
 	lpass_macro_pds_exit(tx->pds);
 }
 
@@ -2418,33 +2442,35 @@ static int tx_macro_runtime_resume(struct device *dev)
 	struct tx_macro *tx = dev_get_drvdata(dev);
 	int ret;
 
+	if (lpass_macro_is_ssr_down(tx->ssr))
+		return -EHOSTDOWN;
 	ret = clk_prepare_enable(tx->mclk);
-	if (ret) {
-		dev_err(dev, "unable to prepare mclk\n");
+	if (ret)
 		return ret;
-	}
-
 	ret = clk_prepare_enable(tx->npl);
-	if (ret) {
-		dev_err(dev, "unable to prepare npl\n");
+	if (ret)
 		goto err_npl;
-	}
-
 	ret = clk_prepare_enable(tx->fsgen);
-	if (ret) {
-		dev_err(dev, "unable to prepare fsgen\n");
+	if (ret)
 		goto err_fsgen;
-	}
 
+	/* Gate prepares also lock SSR state; acquire it after CCF calls. */
+	ret = lpass_macro_ssr_lock(tx->ssr);
+	if (ret)
+		goto err_sync;
 	regcache_cache_only(tx->regmap, false);
-	regcache_sync(tx->regmap);
-
-	return 0;
+	ret = regcache_sync(tx->regmap);
+	if (ret)
+		regcache_cache_only(tx->regmap, true);
+	lpass_macro_ssr_unlock(tx->ssr);
+	if (!ret)
+		return 0;
+err_sync:
+	clk_disable_unprepare(tx->fsgen);
 err_fsgen:
 	clk_disable_unprepare(tx->npl);
 err_npl:
 	clk_disable_unprepare(tx->mclk);
-
 	return ret;
 }
 

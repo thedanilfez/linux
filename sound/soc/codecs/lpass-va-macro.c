@@ -203,6 +203,7 @@ enum {
 #define VA_NUM_CLKS_MAX		3
 
 struct va_macro {
+	struct lpass_macro_ssr *ssr;
 	struct device *dev;
 	unsigned long active_ch_mask[VA_MACRO_MAX_DAIS];
 	unsigned long active_ch_cnt[VA_MACRO_MAX_DAIS];
@@ -1353,10 +1354,20 @@ static int fsgen_gate_enable(struct clk_hw *hw)
 	struct regmap *regmap = va->regmap;
 	int ret;
 
+	if (lpass_macro_is_ssr_down(va->ssr))
+		return -EHOSTDOWN;
+
 	if (va->has_swr_master) {
 		ret = clk_prepare_enable(va->mclk);
 		if (ret)
 			return ret;
+	}
+
+	ret = lpass_macro_ssr_lock(va->ssr);
+	if (ret) {
+		if (va->has_swr_master)
+			clk_disable_unprepare(va->mclk);
+		return ret;
 	}
 
 	ret = va_macro_mclk_enable(va, true);
@@ -1364,6 +1375,7 @@ static int fsgen_gate_enable(struct clk_hw *hw)
 		regmap_update_bits(regmap, CDC_VA_CLK_RST_CTRL_SWR_CONTROL,
 				   CDC_VA_SWR_CLK_EN_MASK, CDC_VA_SWR_CLK_ENABLE);
 
+	lpass_macro_ssr_unlock(va->ssr);
 	return ret;
 }
 
@@ -1587,6 +1599,12 @@ static int va_macro_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	va->ssr = lpass_macro_regmap_register_ssr(dev, va->regmap);
+	if (IS_ERR(va->ssr)) {
+		ret = PTR_ERR(va->ssr);
+		goto err;
+	}
+
 	dev_set_drvdata(dev, va);
 
 	data = of_device_get_match_data(dev);
@@ -1701,15 +1719,20 @@ err:
 
 static void va_macro_remove(struct platform_device *pdev)
 {
-	struct va_macro *va = dev_get_drvdata(&pdev->dev);
+	struct device *dev = &pdev->dev;
+	struct va_macro *va = dev_get_drvdata(dev);
 
-	if (va->has_npl_clk)
-		clk_disable_unprepare(va->npl);
-
-	clk_disable_unprepare(va->mclk);
+	pm_runtime_disable(dev);
+	regcache_cache_only(va->regmap, true);
+	snd_soc_unregister_component(dev);
+	if (!pm_runtime_status_suspended(dev)) {
+		if (va->has_npl_clk)
+			clk_disable_unprepare(va->npl);
+		clk_disable_unprepare(va->mclk);
+	}
+	pm_runtime_set_suspended(dev);
 	clk_disable_unprepare(va->dcodec);
 	clk_disable_unprepare(va->macro);
-
 	lpass_macro_pds_exit(va->pds);
 }
 
@@ -1733,25 +1756,34 @@ static int va_macro_runtime_resume(struct device *dev)
 	struct va_macro *va = dev_get_drvdata(dev);
 	int ret;
 
+	if (lpass_macro_is_ssr_down(va->ssr))
+		return -EHOSTDOWN;
 	ret = clk_prepare_enable(va->mclk);
-	if (ret) {
-		dev_err(va->dev, "unable to prepare mclk\n");
+	if (ret)
 		return ret;
-	}
-
 	if (va->has_npl_clk) {
 		ret = clk_prepare_enable(va->npl);
-		if (ret) {
-			clk_disable_unprepare(va->mclk);
-			dev_err(va->dev, "unable to prepare npl\n");
-			return ret;
-		}
+		if (ret)
+			goto err_npl;
 	}
 
+	/* Gate prepares also lock SSR state; acquire it after CCF calls. */
+	ret = lpass_macro_ssr_lock(va->ssr);
+	if (ret)
+		goto err_sync;
 	regcache_cache_only(va->regmap, false);
-	regcache_sync(va->regmap);
-
-	return 0;
+	ret = regcache_sync(va->regmap);
+	if (ret)
+		regcache_cache_only(va->regmap, true);
+	lpass_macro_ssr_unlock(va->ssr);
+	if (!ret)
+		return 0;
+err_sync:
+	if (va->has_npl_clk)
+		clk_disable_unprepare(va->npl);
+err_npl:
+	clk_disable_unprepare(va->mclk);
+	return ret;
 }
 
 

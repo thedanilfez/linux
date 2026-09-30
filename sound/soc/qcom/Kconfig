@@ -99,6 +99,19 @@ config SND_SOC_QDSP6_ASM_DAI
 	select SND_SOC_COMPRESS
 	tristate
 
+config SND_SOC_QDSP6_Q6VOICE_DAI
+	tristate
+
+config SND_SOC_QDSP6_Q6VOICE
+	tristate "QDSP6 Q6Voice audio driver"
+	depends on SND_SOC_QDSP6
+	select SND_SOC_QDSP6_Q6VOICE_DAI
+	help
+	  Support for the QDSP6 Voice Services (MVM/CVS/CVP) used for
+	  cellular voice call audio. The voice samples stay inside the
+	  DSP; this driver only manages the voice sessions that connect
+	  the modem vocoder stream to the AFE codec ports.
+
 config SND_SOC_QDSP6_APM_DAI
 	tristate
 	select SND_SOC_COMPRESS
