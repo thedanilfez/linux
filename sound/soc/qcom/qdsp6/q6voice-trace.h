@@ -1,13 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (c) 2026 thedanilfez <thedanilfezlol@gmail.com>
- *
- * Tracepoints for the QDSP6 Voice Service transport. These are intentionally
- * transport-level (service, opcode, ports, DSP status) so that a complete
- * APR transcript of a call can be reconstructed with:
- *
- *	trace-cmd record -e q6voice:*
- */
+// SPDX-License-Identifier: GPL-2.0 */
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM q6voice

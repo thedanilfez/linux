@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (c) 2026 thedanilfez <thedanilfezlol@gmail.com>
- * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
- * Copyright (c) 2020, Stephan Gerhold
- *
- * CVP - Core Voice Processor / vocproc (ADSP voice service 0x0B).
- *
- * The vocproc is the processing element that bridges the modem-owned vocoder
- * stream to the AFE ports. Its create/set-device commands exist in several
- * revisions; which one the firmware accepts depends on the CVD version, so
- * the caller passes the revision it negotiated with the DSP.
- *
- * All wire structures are packed and match the vendor
- * (techpack/audio/include/dsp/q6voice.h) byte for byte.
- */
+// Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+// Copyright (c) 2020, Stephan Gerhold
 
 #include <linux/module.h>
 #include <linux/of.h>
@@ -38,10 +25,8 @@
 
 #define Q6CVP_DEFAULT_RAMP_MS				20
 
-/* Coefficient for unity gain in Q14 */
 #define Q6CVP_GAIN_Q14_UNITY				(1 << 14)
 
-/* ------------------------------------------------------- create / device */
 
 struct q6cvp_create_cmd {
 	struct apr_hdr hdr;
@@ -79,12 +64,6 @@ struct q6cvp_volume_step_cmd {
 	u16 ramp_duration_ms;
 } __packed;
 
-/*
- * VSS parameter payloads. The SET_PARAM_V2 layout is
- *	{ module_id, param_id, param_size, reserved, <payload> }
- * and the SET_PARAM_V3 layout replaces the flat header with
- *	{ module_id, instance_id, reserved, param_id, param_size }.
- */
 struct q6cvp_param_hdr_v1 {
 	u32 module_id;
 	u32 param_id;
@@ -156,11 +135,6 @@ struct q6cvp_set_param_v2_endpoint_cmd {
 	struct q6cvp_media_format_info info;
 } __packed;
 
-/*
- * Wire-format size checks. These mirror the vendor structures in
- * techpack/audio/include/dsp/q6voice.h; a size change here means the DSP
- * packet layout changed and must be re-validated against the firmware.
- */
 static_assert(sizeof(struct q6cvp_create_cmd) == 64);
 static_assert(sizeof(struct q6cvp_set_device_cmd) == 38);
 static_assert(sizeof(struct q6cvp_dev_channels_cmd) == 24);
