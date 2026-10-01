@@ -289,6 +289,28 @@
 		#sound-dai-cells = <1>;
 	};
 
+	vreg_camera_vana: regulator-camera-vana {
+		compatible = "regulator-fixed";
+		regulator-name = "camera-vana";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		vin-supply = <&vreg_bob>;
+		gpio = <&pm6150l_gpios 11 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <100>;
+	};
+
+	vreg_camera_vio: regulator-camera-vio {
+		compatible = "regulator-fixed";
+		regulator-name = "camera-vio";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vreg_s5a_2p0>;
+		gpio = <&pm6150l_gpios 4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <100>;
+	};
+
 	vreg_ibb: regulator-ibb {
 		compatible = "regulator-fixed";
 		regulator-name = "ibb";
@@ -312,6 +334,54 @@
 		enable-active-high;
 		regulator-boot-on;
 		startup-delay-us = <4000>;
+	};
+};
+
+&camss {
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+
+			csiphy1_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&imx471_ep>;
+			};
+		};
+	};
+};
+
+&cci0_i2c1 {
+	clock-frequency = <400000>;
+
+	camera@10 {
+		compatible = "sony,imx471";
+		reg = <0x10>;
+
+		clocks = <&camcc CAMCC_MCLK0_CLK>;
+		assigned-clocks = <&camcc CAMCC_MCLK0_CLK>;
+		assigned-clock-rates = <19200000>;
+
+		reset-gpios = <&tlmm 23 GPIO_ACTIVE_LOW>;
+		vana-supply = <&vreg_camera_vana>;
+		dovdd-supply = <&vreg_camera_vio>;
+		dvdd-supply = <&dvdd2>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&camera_front_reset &camera_mclk0>;
+
+		orientation = <0>;
+		rotation = <90>;
+
+		port {
+			imx471_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				link-frequencies = /bits/ 64 <702933333>;
+				remote-endpoint = <&csiphy1_ep>;
+			};
+		};
 	};
 };
 
@@ -542,6 +612,20 @@
 };
 
 &tlmm {
+	camera_front_reset: camera-front-reset-state {
+		pins = "gpio23";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	camera_mclk0: camera-mclk0-state {
+		pins = "gpio13";
+		function = "cam_mclk";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
 	amp_t_int_default: amp-t-int-default-state {
 		pins = "gpio93";
 		function = "gpio";

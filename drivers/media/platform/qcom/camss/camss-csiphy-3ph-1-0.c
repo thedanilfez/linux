@@ -1274,6 +1274,32 @@ static bool csiphy_is_gen2(u32 version)
 	return ret;
 }
 
+static void csiphy_dump_registers(struct csiphy_device *csiphy,
+				  const char *stage)
+{
+	struct csiphy_device_regs *regs = csiphy->regs;
+	struct device *dev = csiphy->camss->dev;
+	unsigned int i;
+
+	dev_info(dev,
+		 "camera-debug PHY%u %s: timer=%u ctrl0=%08x lanes=%08x power=%08x ctrl7=%08x\n",
+		 csiphy->id, stage, csiphy->timer_clk_rate,
+		 readl_relaxed(csiphy->base +
+			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 0)),
+		 readl_relaxed(csiphy->base +
+			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 5)),
+		 readl_relaxed(csiphy->base +
+			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 6)),
+		 readl_relaxed(csiphy->base +
+			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 7)));
+	for (i = 0; i < 11; i++)
+		dev_info(dev, "camera-debug PHY%u %s: status%u=%08x\n",
+			 csiphy->id, stage, i,
+			 readl_relaxed(csiphy->base +
+				       CSIPHY_3PH_CMN_CSI_COMMON_STATUSn(regs->offset,
+						regs->common_status_offset, i)));
+}
+
 static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 				struct csiphy_config *cfg,
 				s64 link_freq, u8 lane_mask)
@@ -1285,6 +1311,9 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 	int i;
 
 	settle_cnt = csiphy_settle_cnt_calc(link_freq, csiphy->timer_clk_rate);
+	dev_info(csiphy->camss->dev,
+		 "camera-debug PHY%u: link=%lld lanes=%u settle=%u\n",
+		 csiphy->id, link_freq, c->num_data, settle_cnt);
 
 	val = CSIPHY_3PH_CMN_CSI_COMMON_CTRL5_CLK_ENABLE;
 	for (i = 0; i < c->num_data; i++)
@@ -1297,11 +1326,19 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 	writel_relaxed(val, csiphy->base +
 		       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 6));
 
-	val = 0x02;
+	/* SM7150 uses the CSIPHY v1.2 common-control settings. */
+	val = csiphy->camss->res->version == CAMSS_7150 ? 0x52 : 0x02;
 	writel_relaxed(val, csiphy->base +
 		       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 7));
 
 	val = 0x00;
+	if (csiphy->camss->res->version == CAMSS_7150) {
+		/* Reset the v1.2 common block after enabling lane power. */
+		writel(0x03, csiphy->base +
+		       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 0));
+		usleep_range(1000, 1010);
+		val = 0x02;
+	}
 	writel_relaxed(val, csiphy->base +
 		       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 0));
 
@@ -1315,12 +1352,15 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 		writel_relaxed(0, csiphy->base +
 			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, i));
 	}
+	csiphy_dump_registers(csiphy, "stream-on");
 }
 
 static void csiphy_lanes_disable(struct csiphy_device *csiphy,
 				 struct csiphy_config *cfg)
 {
 	struct csiphy_device_regs *regs = csiphy->regs;
+
+	csiphy_dump_registers(csiphy, "before-stream-off");
 
 	writel_relaxed(0, csiphy->base +
 			  CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 5));
