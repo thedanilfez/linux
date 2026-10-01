@@ -12,7 +12,6 @@
 #include <linux/iopoll.h>
 
 #include "camss.h"
-#include "camss-csid.h"
 #include "camss-vfe.h"
 
 #define VFE_GLOBAL_RESET_CMD			(0x018)
@@ -197,16 +196,10 @@ static void vfe_global_reset(struct vfe_device *vfe)
 			 GLOBAL_RESET_CMD_RDI2		|
 			 GLOBAL_RESET_CMD_RDI3;
 
-	if (vfe->camss->res->version == CAMSS_7150 && vfe->stream_count)
-		csid_gen2_dump_registers(&vfe->camss->csid[vfe->id],
-					"before-vfe-reset");
-
 	writel_relaxed(BIT(31), vfe->base + VFE_IRQ_MASK_0);
 
 	/* Make sure IRQ mask has been written before resetting */
 	wmb();
-
-	printk(KERN_INFO "Writing reset_bits=%x to vfe->base=%p with id %d\n", reset_bits, vfe->base, vfe->id);
 	writel_relaxed(reset_bits, vfe->base + VFE_GLOBAL_RESET_CMD);
 }
 
@@ -333,27 +326,18 @@ static void vfe_violation_read(struct vfe_device *vfe)
  */
 static irqreturn_t vfe_isr(int irq, void *dev)
 {
-	printk(KERN_INFO "vfe irq handled!\n");
-
 	struct vfe_device *vfe = dev;
 	u32 status0, status1, vfe_bus_status[VFE_LINE_NUM_MAX];
 	int i, wm;
 
 	status0 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_0);
 	status1 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_1);
-	dev_info_ratelimited(vfe->camss->dev,
-			     "camera-debug VFE%u IRQ: status0=%08x status1=%08x\n",
-			     vfe->id, status0, status1);
 
 	writel_relaxed(status0, vfe->base + VFE_IRQ_CLEAR_0);
 	writel_relaxed(status1, vfe->base + VFE_IRQ_CLEAR_1);
 
 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++) {
 		vfe_bus_status[i] = readl_relaxed(vfe->base + VFE_BUS_IRQ_STATUS(i));
-		if (vfe_bus_status[i])
-			dev_info_ratelimited(vfe->camss->dev,
-					     "camera-debug VFE%u bus%u IRQ=%08x\n",
-					     vfe->id, i, vfe_bus_status[i]);
 		writel_relaxed(vfe_bus_status[i], vfe->base + VFE_BUS_IRQ_CLEAR(i));
 	}
 

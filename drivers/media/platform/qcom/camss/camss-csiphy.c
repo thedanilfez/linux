@@ -7,7 +7,6 @@
  * Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  * Copyright (C) 2016-2018 Linaro Ltd.
  */
-#define DEBUG
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -278,6 +277,12 @@ static int csiphy_stream_on(struct csiphy_device *csiphy)
 	if (link_freq < 0) {
 		dev_err(csiphy->camss->dev,
 			"Cannot get CSI2 transmitter's link frequency\n");
+		return -EINVAL;
+	}
+
+	if (!csiphy->timer_clk_rate) {
+		dev_err(csiphy->camss->dev, "CSIPHY%u timer clock rate is zero\n",
+			csiphy->id);
 		return -EINVAL;
 	}
 
@@ -723,17 +728,14 @@ static int csiphy_link_setup(struct media_entity *entity,
 			     const struct media_pad *local,
 			     const struct media_pad *remote, u32 flags)
 {
-	printk(KERN_INFO "csiphy_link_setup called\n");
 	if ((local->flags & MEDIA_PAD_FL_SOURCE) &&
 	    (flags & MEDIA_LNK_FL_ENABLED)) {
 		struct v4l2_subdev *sd;
 		struct csiphy_device *csiphy;
 		struct csid_device *csid;
 
-		if (media_pad_remote_pad_first(local)) {
-			printk("media_pad_remote_pad_first\n");
+		if (media_pad_remote_pad_first(local))
 			return -EBUSY;
-		}
 
 		sd = media_entity_to_v4l2_subdev(entity);
 		csiphy = v4l2_get_subdevdata(sd);

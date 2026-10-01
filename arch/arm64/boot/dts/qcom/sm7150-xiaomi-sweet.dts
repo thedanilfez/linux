@@ -350,6 +350,15 @@
 				remote-endpoint = <&imx471_ep>;
 			};
 		};
+
+		port@3 {
+			reg = <3>;
+
+			csiphy3_ep: endpoint {
+				data-lanes = <0 1>;
+				remote-endpoint = <&ov5675_ep>;
+			};
+		};
 	};
 };
 
@@ -380,6 +389,36 @@
 				data-lanes = <0 1 2 3>;
 				link-frequencies = /bits/ 64 <702933333>;
 				remote-endpoint = <&csiphy1_ep>;
+			};
+		};
+	};
+
+	camera@36 {
+		compatible = "xiaomi,sweet-ov5675", "ovti,ov5675";
+		reg = <0x36>;
+
+		clocks = <&camcc CAMCC_MCLK3_CLK>;
+		assigned-clocks = <&camcc CAMCC_MCLK3_CLK>;
+		assigned-clock-rates = <19200000>;
+
+		reset-gpios = <&tlmm 24 GPIO_ACTIVE_LOW>;
+		mipi-switch-gpios = <&tlmm 88 GPIO_ACTIVE_HIGH>;
+		avdd-supply = <&vreg_camera_vana>;
+		dovdd-supply = <&vreg_camera_vio>;
+		dvdd-supply = <&dvdd1>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&camera_macro_reset &camera_macro_mipi_switch
+			     &camera_mclk3>;
+
+		orientation = <1>;
+		rotation = <270>;
+
+		port {
+			ov5675_ep: endpoint {
+				data-lanes = <0 1>;
+				link-frequencies = /bits/ 64 <450000000>;
+				remote-endpoint = <&csiphy3_ep>;
 			};
 		};
 	};
@@ -621,6 +660,27 @@
 
 	camera_mclk0: camera-mclk0-state {
 		pins = "gpio13";
+		function = "cam_mclk";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
+	camera_macro_reset: camera-macro-reset-state {
+		pins = "gpio24";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	camera_macro_mipi_switch: camera-macro-mipi-switch-state {
+		pins = "gpio88";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	camera_mclk3: camera-mclk3-state {
+		pins = "gpio16";
 		function = "cam_mclk";
 		drive-strength = <6>;
 		bias-disable;

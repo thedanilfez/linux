@@ -568,51 +568,6 @@ disable_regulators:
 	return ret;
 }
 
-static void imx471_dump_registers(struct imx471 *sensor, const char *stage)
-{
-	static const u32 regs[] = {
-		IMX471_REG_MODE_SELECT,
-		IMX471_REG_ORIENTATION,
-		IMX471_REG_GROUP_HOLD,
-		CCI_REG16(0x0112),
-		CCI_REG8(0x0114),
-		CCI_REG16(0x0136),
-		IMX471_REG_EXPOSURE,
-		IMX471_REG_ANALOG_GAIN,
-		IMX471_REG_DIG_GAIN_GLOBAL,
-		CCI_REG8(0x0305),
-		CCI_REG16(0x0306),
-		CCI_REG8(0x030b),
-		CCI_REG8(0x030d),
-		CCI_REG16(0x030e),
-		IMX471_REG_FLL,
-		CCI_REG16(0x0342),
-		CCI_REG16(0x034c),
-		CCI_REG16(0x034e),
-		CCI_REG8(0x0900),
-		CCI_REG8(0x0901),
-	};
-	unsigned int i;
-	u64 val;
-	int ret;
-
-	dev_info(sensor->dev,
-		 "camera-debug %s: clock=%lu vblank=%d exposure=%d\n",
-		 stage, clk_get_rate(sensor->img_clk), sensor->vblank->val,
-		 sensor->exposure->val);
-	for (i = 0; i < ARRAY_SIZE(regs); i++) {
-		ret = cci_read(sensor->regmap, regs[i], &val, NULL);
-		if (ret)
-			dev_warn(sensor->dev,
-				 "camera-debug %s: read %04lx failed: %d\n",
-				 stage, CCI_REG_ADDR(regs[i]), ret);
-		else
-			dev_info(sensor->dev,
-				 "camera-debug %s: reg %04lx=%04llx\n",
-				 stage, CCI_REG_ADDR(regs[i]), val);
-	}
-}
-
 static int imx471_enable_stream(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *state,
 				u32 pad, u64 streams_mask)
@@ -658,12 +613,10 @@ static int imx471_enable_stream(struct v4l2_subdev *sd,
 	if (ret)
 		goto error_powerdown;
 
-	imx471_dump_registers(sensor, "stream-on");
-
 	return ret;
 
 error_powerdown:
-	dev_err(sensor->dev, "camera-debug stream-on failed: %d\n", ret);
+	dev_err(sensor->dev, "failed to enable stream: %d\n", ret);
 	pm_runtime_put(sensor->dev);
 
 	return ret;
@@ -675,8 +628,6 @@ static int imx471_disable_stream(struct v4l2_subdev *sd,
 {
 	struct imx471 *sensor = to_imx471(sd);
 	int ret;
-
-	imx471_dump_registers(sensor, "before-stream-off");
 
 	ret = cci_write(sensor->regmap, IMX471_REG_MODE_SELECT,
 			IMX471_MODE_STANDBY, NULL);

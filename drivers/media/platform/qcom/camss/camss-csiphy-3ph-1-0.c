@@ -7,8 +7,6 @@
  * Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  * Copyright (C) 2016-2018 Linaro Ltd.
  */
-#define DEBUG
-
 #include "camss.h"
 #include "camss-csiphy.h"
 
@@ -1075,8 +1073,6 @@ static void csiphy_reset(struct csiphy_device *csiphy)
 {
 	struct csiphy_device_regs *regs = csiphy->regs;
 
-	printk(KERN_DEBUG "csiphy_reset id %d with base %p and offset %d\n", csiphy->id, csiphy->base, regs->offset);
-
 	writel_relaxed(0x1, csiphy->base +
 		      CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 0));
 	usleep_range(5000, 8000);
@@ -1089,8 +1085,6 @@ static irqreturn_t csiphy_isr(int irq, void *dev)
 	struct csiphy_device *csiphy = dev;
 	struct csiphy_device_regs *regs = csiphy->regs;
 	int i;
-
-	printk(KERN_DEBUG "csiphy_isr called\n");
 
 	for (i = 0; i < 11; i++) {
 		int c = i + 22;
@@ -1125,7 +1119,7 @@ static irqreturn_t csiphy_isr(int irq, void *dev)
  * Return settle count value or 0 if the CSI2 link frequency
  * is not available
  */
-static u8 csiphy_settle_cnt_calc(s64 link_freq, u32 timer_clk_rate)
+static u8 csiphy_settle_cnt_calc(struct csiphy_device *csiphy, s64 link_freq)
 {
 	u32 ui; /* ps */
 	u32 timer_period; /* ps */
@@ -1140,8 +1134,11 @@ static u8 csiphy_settle_cnt_calc(s64 link_freq, u32 timer_clk_rate)
 	ui /= 2;
 	t_hs_prepare_max = 85000 + 6 * ui;
 	t_hs_settle = t_hs_prepare_max;
+	/* Use the midpoint to avoid sampling before HS prepare ends. */
+	if (csiphy->camss->res->version == CAMSS_7150)
+		t_hs_settle = (t_hs_prepare_max + 145000 + 10 * ui) / 2;
 
-	timer_period = div_u64(1000000000000LL, timer_clk_rate);
+	timer_period = div_u64(1000000000000LL, csiphy->timer_clk_rate);
 	settle_cnt = t_hs_settle / timer_period - 6;
 
 	return settle_cnt;
@@ -1274,32 +1271,6 @@ static bool csiphy_is_gen2(u32 version)
 	return ret;
 }
 
-static void csiphy_dump_registers(struct csiphy_device *csiphy,
-				  const char *stage)
-{
-	struct csiphy_device_regs *regs = csiphy->regs;
-	struct device *dev = csiphy->camss->dev;
-	unsigned int i;
-
-	dev_info(dev,
-		 "camera-debug PHY%u %s: timer=%u ctrl0=%08x lanes=%08x power=%08x ctrl7=%08x\n",
-		 csiphy->id, stage, csiphy->timer_clk_rate,
-		 readl_relaxed(csiphy->base +
-			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 0)),
-		 readl_relaxed(csiphy->base +
-			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 5)),
-		 readl_relaxed(csiphy->base +
-			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 6)),
-		 readl_relaxed(csiphy->base +
-			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 7)));
-	for (i = 0; i < 11; i++)
-		dev_info(dev, "camera-debug PHY%u %s: status%u=%08x\n",
-			 csiphy->id, stage, i,
-			 readl_relaxed(csiphy->base +
-				       CSIPHY_3PH_CMN_CSI_COMMON_STATUSn(regs->offset,
-						regs->common_status_offset, i)));
-}
-
 static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 				struct csiphy_config *cfg,
 				s64 link_freq, u8 lane_mask)
@@ -1310,11 +1281,7 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 	u8 val;
 	int i;
 
-	settle_cnt = csiphy_settle_cnt_calc(link_freq, csiphy->timer_clk_rate);
-	dev_info(csiphy->camss->dev,
-		 "camera-debug PHY%u: link=%lld lanes=%u settle=%u\n",
-		 csiphy->id, link_freq, c->num_data, settle_cnt);
-
+	settle_cnt = csiphy_settle_cnt_calc(csiphy, link_freq);
 	val = CSIPHY_3PH_CMN_CSI_COMMON_CTRL5_CLK_ENABLE;
 	for (i = 0; i < c->num_data; i++)
 		val |= BIT(c->data[i].pos * 2);
@@ -1352,15 +1319,12 @@ static void csiphy_lanes_enable(struct csiphy_device *csiphy,
 		writel_relaxed(0, csiphy->base +
 			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, i));
 	}
-	csiphy_dump_registers(csiphy, "stream-on");
 }
 
 static void csiphy_lanes_disable(struct csiphy_device *csiphy,
 				 struct csiphy_config *cfg)
 {
 	struct csiphy_device_regs *regs = csiphy->regs;
-
-	csiphy_dump_registers(csiphy, "before-stream-off");
 
 	writel_relaxed(0, csiphy->base +
 			  CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 5));

@@ -67,10 +67,6 @@
 #define			CGC_MODE_DYNAMIC_GATING		0
 #define			CGC_MODE_ALWAYS_ON		1
 
-#define CSID_CSI2_RX_TOTAL_PKTS	0x160
-#define CSID_CSI2_RX_STATS_ECC	0x164
-#define CSID_CSI2_RX_TOTAL_CRC_ERR	0x168
-
 #define CSID_RDI_CFG0(rdi)			((csid_is_lite(csid) ? 0x200 : 0x300) \
 						 + 0x100 * (rdi))
 #define		RDI_CFG0_BYTE_CNTR_EN		0
@@ -326,36 +322,6 @@ static void __csid_configure_rdi_stream(struct csid_device *csid, u8 enable, u8 
 	writel_relaxed(val, csid->base + CSID_RDI_CFG0(port));
 }
 
-void csid_gen2_dump_registers(struct csid_device *csid, const char *stage)
-{
-	struct device *dev = csid->camss->dev;
-	unsigned int i;
-
-	dev_info(dev,
-		 "camera-debug CSID%u %s: phy=%u lanes=%u assign=%04x vc=%x cfg0=%08x cfg1=%08x rx_irq=%08x\n",
-		 csid->id, stage, csid->phy.csiphy_id, csid->phy.lane_cnt,
-		 csid->phy.lane_assign, csid->phy.en_vc,
-		 readl_relaxed(csid->base + CSID_CSI2_RX_CFG0),
-		 readl_relaxed(csid->base + CSID_CSI2_RX_CFG1),
-		 readl_relaxed(csid->base + CSID_CSI2_RX_IRQ_STATUS));
-	dev_info(dev,
-		 "camera-debug CSID%u %s: packets=%08x ecc=%08x crc_errors=%08x\n",
-		 csid->id, stage,
-		 readl_relaxed(csid->base + CSID_CSI2_RX_TOTAL_PKTS),
-		 readl_relaxed(csid->base + CSID_CSI2_RX_STATS_ECC),
-		 readl_relaxed(csid->base + CSID_CSI2_RX_TOTAL_CRC_ERR));
-	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++) {
-		if (!(csid->phy.en_vc & BIT(i)))
-			continue;
-		dev_info(dev,
-			 "camera-debug CSID%u %s: RDI%u cfg0=%08x ctrl=%08x irq=%08x\n",
-			 csid->id, stage, i,
-			 readl_relaxed(csid->base + CSID_RDI_CFG0(i)),
-			 readl_relaxed(csid->base + CSID_RDI_CTRL(i)),
-			 readl_relaxed(csid->base + CSID_CSI2_RDIN_IRQ_STATUS(i)));
-	}
-}
-
 static void csid_configure_stream(struct csid_device *csid, u8 enable)
 {
 	struct csid_testgen_config *tg = &csid->testgen;
@@ -371,9 +337,6 @@ static void csid_configure_stream(struct csid_device *csid, u8 enable)
 			__csid_configure_rx(csid, &csid->phy, 0);
 			__csid_ctrl_rdi(csid, enable, i);
 		}
-
-	if (enable)
-		csid_gen2_dump_registers(csid, "stream-on");
 }
 
 static int csid_configure_testgen_pattern(struct csid_device *csid, s32 val)
@@ -393,7 +356,6 @@ static int csid_configure_testgen_pattern(struct csid_device *csid, s32 val)
  */
 static irqreturn_t csid_isr(int irq, void *dev)
 {
-	printk(KERN_INFO "CSID got IRQ\n");
 	struct csid_device *csid = dev;
 	u32 val;
 	u8 reset_done;
@@ -404,10 +366,6 @@ static irqreturn_t csid_isr(int irq, void *dev)
 	reset_done = val & BIT(TOP_IRQ_STATUS_RESET_DONE);
 
 	val = readl_relaxed(csid->base + CSID_CSI2_RX_IRQ_STATUS);
-	if (val)
-		dev_info_ratelimited(csid->camss->dev,
-				     "camera-debug CSID%u RX IRQ=%08x\n",
-				     csid->id, val);
 	writel_relaxed(val, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
 
 	/* Read and clear IRQ status for each enabled RDI channel */
@@ -434,7 +392,6 @@ static irqreturn_t csid_isr(int irq, void *dev)
  */
 static int csid_reset(struct csid_device *csid)
 {
-	printk(KERN_INFO "csid_reset called\n");
 	unsigned long time;
 	u32 val;
 

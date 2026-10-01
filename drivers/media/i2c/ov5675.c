@@ -80,6 +80,12 @@
 
 #define to_ov5675(_sd)			container_of(_sd, struct ov5675, sd)
 
+enum ov5675_supply {
+	OV5675_SUPPLY_AVDD,
+	OV5675_SUPPLY_DOVDD,
+	OV5675_SUPPLY_DVDD,
+};
+
 static const char * const ov5675_supply_names[] = {
 	"avdd",		/* Analog power */
 	"dovdd",	/* Digital I/O power */
@@ -444,6 +450,237 @@ static const struct ov5675_reg mode_1296x972_regs[] = {
 	{0x37ce, 0x1f},
 };
 
+static const struct ov5675_reg sweet_global_regs[] = {
+	{0x0103, 0x01},
+	{0x0300, 0x07},
+	{0x0301, 0x01},
+	{0x0302, 0x77},
+	{0x0303, 0x00},
+	{0x030b, 0x02},
+	{0x030d, 0x4b},
+	{0x3002, 0x21},
+	{0x3107, 0x01},
+	{0x3500, 0x00},
+	{0x3501, 0x3e},
+	{0x3502, 0x60},
+	{0x3503, 0x08},
+	{0x3508, 0x04},
+	{0x3509, 0x00},
+	{0x3600, 0x66},
+	{0x3602, 0x30},
+	{0x3610, 0xa5},
+	{0x3612, 0x93},
+	{0x3620, 0x80},
+	{0x3642, 0x0e},
+	{0x3661, 0x00},
+	{0x3662, 0x10},
+	{0x3664, 0xf3},
+	{0x3665, 0x9e},
+	{0x3667, 0xa5},
+	{0x366e, 0x55},
+	{0x366f, 0x55},
+	{0x3670, 0x11},
+	{0x3671, 0x11},
+	{0x3672, 0x11},
+	{0x3673, 0x11},
+	{0x3714, 0x24},
+	{0x371a, 0x3e},
+	{0x3733, 0x10},
+	{0x3734, 0x00},
+	{0x373d, 0x24},
+	{0x3764, 0x20},
+	{0x3765, 0x20},
+	{0x3766, 0x12},
+	{0x37a1, 0x14},
+	{0x37a8, 0x1c},
+	{0x37ab, 0x0f},
+	{0x37c2, 0x04},
+	{0x37cb, 0x09},
+	{0x37cc, 0x15},
+	{0x37cd, 0x1f},
+	{0x37ce, 0x1f},
+	{0x37d8, 0x02},
+	{0x37d9, 0x08},
+	{0x37dc, 0x04},
+	{0x3800, 0x00},
+	{0x3801, 0x00},
+	{0x3802, 0x00},
+	{0x3803, 0x04},
+	{0x3804, 0x0a},
+	{0x3805, 0x3f},
+	{0x3806, 0x07},
+	{0x3807, 0xb3},
+	{0x3808, 0x0a},
+	{0x3809, 0x20},
+	{0x380a, 0x07},
+	{0x380b, 0x98},
+	{0x380c, 0x02},
+	{0x380d, 0xee},
+	{0x380e, 0x07},
+	{0x380f, 0xd0},
+	{0x3811, 0x10},
+	{0x3813, 0x0c},
+	{0x3814, 0x01},
+	{0x3815, 0x01},
+	{0x3816, 0x01},
+	{0x3817, 0x01},
+	{0x381e, 0x02},
+	{0x3820, 0x88},
+	{0x3821, 0x01},
+	{0x3832, 0x48},
+	{0x3c80, 0x08},
+	{0x3c82, 0x00},
+	{0x3c83, 0xb1},
+	{0x3c8c, 0x10},
+	{0x3c8d, 0x00},
+	{0x3c90, 0x00},
+	{0x3c91, 0x00},
+	{0x3c92, 0x00},
+	{0x3c93, 0x00},
+	{0x3c94, 0x00},
+	{0x3c95, 0x00},
+	{0x3c96, 0x00},
+	{0x3c97, 0x00},
+	{0x3d8c, 0x71},
+	{0x3d8d, 0xe7},
+	{0x4001, 0xe0},
+	{0x4003, 0x40},
+	{0x4008, 0x02},
+	{0x4009, 0x0d},
+	{0x400f, 0x80},
+	{0x4013, 0x02},
+	{0x4040, 0x00},
+	{0x4041, 0x07},
+	{0x404c, 0x50},
+	{0x404e, 0x20},
+	{0x4500, 0x06},
+	{0x4503, 0x00},
+	{0x450a, 0x04},
+	{0x4809, 0x04},
+	{0x480c, 0x12},
+	{0x4819, 0x70},
+	{0x4825, 0x32},
+	{0x4826, 0x32},
+	{0x482a, 0x06},
+	{0x4833, 0x08},
+	{0x4837, 0x11},
+	{0x5000, 0x77},
+	{0x5b00, 0x01},
+	{0x5b01, 0x10},
+	{0x5b02, 0x01},
+	{0x5b03, 0xdb},
+	{0x5b05, 0x6c},
+	{0x5e10, 0xfc},
+	{0x5780, 0x3e},
+	{0x5781, 0x0f},
+	{0x5782, 0x44},
+	{0x5783, 0x02},
+	{0x5784, 0x01},
+	{0x5785, 0x01},
+	{0x5786, 0x00},
+	{0x5787, 0x04},
+	{0x5788, 0x02},
+	{0x5789, 0x0f},
+	{0x578a, 0xfd},
+	{0x578b, 0xf5},
+	{0x578c, 0xf5},
+	{0x578d, 0x03},
+	{0x578e, 0x08},
+	{0x578f, 0x0c},
+	{0x5790, 0x08},
+	{0x5791, 0x06},
+	{0x5792, 0x00},
+	{0x5793, 0x52},
+	{0x5794, 0xa3},
+};
+
+static const struct ov5675_reg sweet_2592x1944_regs[] = {
+	{0x3501, 0x3e},
+	{0x3502, 0x60},
+	{0x3503, 0x08},
+	{0x3508, 0x04},
+	{0x3509, 0x00},
+	{0x3662, 0x10},
+	{0x3714, 0x24},
+	{0x371a, 0x3e},
+	{0x37c2, 0x04},
+	{0x37d9, 0x08},
+	{0x3800, 0x00},
+	{0x3801, 0x00},
+	{0x3802, 0x00},
+	{0x3803, 0x04},
+	{0x3804, 0x0a},
+	{0x3805, 0x3f},
+	{0x3806, 0x07},
+	{0x3807, 0xb3},
+	{0x3808, 0x0a},
+	{0x3809, 0x20},
+	{0x380a, 0x07},
+	{0x380b, 0x98},
+	{0x380c, 0x02},
+	{0x380d, 0xee},
+	{0x380e, 0x07},
+	{0x380f, 0xd0},
+	{0x3811, 0x10},
+	{0x3813, 0x0c},
+	{0x3814, 0x01},
+	{0x3815, 0x01},
+	{0x3816, 0x01},
+	{0x3817, 0x01},
+	{0x381e, 0x02},
+	{0x3820, 0x88},
+	{0x3821, 0x01},
+	{0x4008, 0x02},
+	{0x4009, 0x0d},
+	{0x4041, 0x07},
+};
+
+static const struct ov5675_reg sweet_2592x1458_regs[] = {
+	{0x3501, 0x3e},
+	{0x3502, 0x60},
+	{0x3503, 0x08},
+	{0x3508, 0x04},
+	{0x3509, 0x00},
+	{0x3662, 0x10},
+	{0x3714, 0x24},
+	{0x371a, 0x3e},
+	{0x37c2, 0x04},
+	{0x37d9, 0x08},
+	{0x3800, 0x00},
+	{0x3801, 0x00},
+	{0x3802, 0x00},
+	{0x3803, 0xf8},
+	{0x3804, 0x0a},
+	{0x3805, 0x3f},
+	{0x3806, 0x06},
+	{0x3807, 0xc1},
+	{0x3808, 0x0a},
+	{0x3809, 0x20},
+	{0x380a, 0x05},
+	{0x380b, 0xb2},
+	{0x380c, 0x02},
+	{0x380d, 0xee},
+	{0x380e, 0x07},
+	{0x380f, 0xd0},
+	{0x3811, 0x10},
+	{0x3813, 0x0c},
+	{0x3814, 0x01},
+	{0x3815, 0x01},
+	{0x3816, 0x01},
+	{0x3817, 0x01},
+	{0x381e, 0x02},
+	{0x3820, 0x88},
+	{0x3821, 0x01},
+	{0x4008, 0x02},
+	{0x4009, 0x0d},
+	{0x4041, 0x07},
+};
+
+static const struct ov5675_reg_list sweet_init = {
+	.num_of_regs = ARRAY_SIZE(sweet_global_regs),
+	.regs = sweet_global_regs,
+};
+
 static const char * const ov5675_test_pattern_menu[] = {
 	"Disabled",
 	"Standard Color Bar",
@@ -492,7 +729,53 @@ static const struct ov5675_mode supported_modes[] = {
 	}
 };
 
+static const struct ov5675_mode sweet_modes[] = {
+	{
+		.width = 2592,
+		.height = 1944,
+		.hts = 1500,
+		.vts_def = 2000,
+		.vts_min = 2000,
+		.link_freq_index = OV5675_LINK_FREQ_900MBPS,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(sweet_2592x1944_regs),
+			.regs = sweet_2592x1944_regs,
+		},
+	},
+	{
+		.width = 2592,
+		.height = 1458,
+		.hts = 1500,
+		.vts_def = 2000,
+		.vts_min = 2000,
+		.link_freq_index = OV5675_LINK_FREQ_900MBPS,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(sweet_2592x1458_regs),
+			.regs = sweet_2592x1458_regs,
+		},
+	},
+};
+
+struct ov5675_module_config {
+	const struct ov5675_mode *modes;
+	unsigned int num_modes;
+	u32 mbus_code;
+};
+
+static const struct ov5675_module_config ov5675_generic_config = {
+	.modes = supported_modes,
+	.num_modes = ARRAY_SIZE(supported_modes),
+	.mbus_code = MEDIA_BUS_FMT_SGRBG10_1X10,
+};
+
+static const struct ov5675_module_config ov5675_sweet_config = {
+	.modes = sweet_modes,
+	.num_modes = ARRAY_SIZE(sweet_modes),
+	.mbus_code = MEDIA_BUS_FMT_SBGGR10_1X10,
+};
+
 struct ov5675 {
+	const struct ov5675_module_config *config;
 	struct device *dev;
 
 	struct v4l2_subdev sd;
@@ -500,6 +783,7 @@ struct ov5675 {
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct clk *xvclk;
 	struct gpio_desc *reset_gpio;
+	struct gpio_desc *mipi_switch_gpio;
 	struct regulator_bulk_data supplies[OV5675_NUM_SUPPLIES];
 
 	/* V4L2 Controls */
@@ -559,8 +843,12 @@ static int ov5675_read_reg(struct ov5675 *ov5675, u16 reg, u16 len, u32 *val)
 	msgs[1].buf = &data_buf[4 - len];
 
 	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
-	if (ret != ARRAY_SIZE(msgs))
-		return -EIO;
+	if (ret != ARRAY_SIZE(msgs)) {
+		dev_err_ratelimited(ov5675->dev,
+				    "read reg 0x%04x len %u failed: %d\n",
+				    reg, len, ret);
+		return ret < 0 ? ret : -EIO;
+	}
 
 	*val = get_unaligned_be32(data_buf);
 
@@ -571,14 +859,20 @@ static int ov5675_write_reg(struct ov5675 *ov5675, u16 reg, u16 len, u32 val)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&ov5675->sd);
 	u8 buf[6];
+	int ret;
 
 	if (len > 4)
 		return -EINVAL;
 
 	put_unaligned_be16(reg, buf);
 	put_unaligned_be32(val << 8 * (4 - len), buf + 2);
-	if (i2c_master_send(client, buf, len + 2) != len + 2)
-		return -EIO;
+	ret = i2c_master_send(client, buf, len + 2);
+	if (ret != len + 2) {
+		dev_err_ratelimited(ov5675->dev,
+				    "write reg 0x%04x len %u value 0x%x failed: %d\n",
+				    reg, len, val, ret);
+		return ret < 0 ? ret : -EIO;
+	}
 
 	return 0;
 }
@@ -745,7 +1039,7 @@ static int ov5675_set_ctrl(struct v4l2_ctrl *ctrl)
 		ret = ov5675_write_reg(ov5675, OV5675_REG_VTS,
 				       OV5675_REG_VALUE_16BIT,
 				       ov5675->cur_mode->height + ctrl->val +
-				       10);
+				       (ov5675->config == &ov5675_sweet_config ? 0 : 10));
 		break;
 
 	case V4L2_CID_TEST_PATTERN:
@@ -813,11 +1107,15 @@ static int ov5675_init_controls(struct ov5675 *ov5675)
 		ov5675->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops, V4L2_CID_ANALOGUE_GAIN,
-			  OV5675_ANAL_GAIN_MIN, OV5675_ANAL_GAIN_MAX,
+			  OV5675_ANAL_GAIN_MIN,
+			  ov5675->config == &ov5675_sweet_config ?
+			  1984 : OV5675_ANAL_GAIN_MAX,
 			  OV5675_ANAL_GAIN_STEP, OV5675_ANAL_GAIN_MIN);
-	v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops, V4L2_CID_DIGITAL_GAIN,
-			  OV5675_DGTL_GAIN_MIN, OV5675_DGTL_GAIN_MAX,
-			  OV5675_DGTL_GAIN_STEP, OV5675_DGTL_GAIN_DEFAULT);
+	if (ov5675->config != &ov5675_sweet_config)
+		v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops,
+				  V4L2_CID_DIGITAL_GAIN, OV5675_DGTL_GAIN_MIN,
+				  OV5675_DGTL_GAIN_MAX, OV5675_DGTL_GAIN_STEP,
+				  OV5675_DGTL_GAIN_DEFAULT);
 	exposure_max = (ov5675->cur_mode->vts_def - OV5675_EXPOSURE_MAX_MARGIN);
 	ov5675->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops,
 					     V4L2_CID_EXPOSURE,
@@ -828,10 +1126,12 @@ static int ov5675_init_controls(struct ov5675 *ov5675)
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(ov5675_test_pattern_menu) - 1,
 				     0, 0, ov5675_test_pattern_menu);
-	v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops,
-			  V4L2_CID_HFLIP, 0, 1, 1, 0);
-	v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops,
-			  V4L2_CID_VFLIP, 0, 1, 1, 0);
+	if (ov5675->config != &ov5675_sweet_config) {
+		v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops,
+				  V4L2_CID_HFLIP, 0, 1, 1, 0);
+		v4l2_ctrl_new_std(ctrl_hdlr, &ov5675_ctrl_ops,
+				  V4L2_CID_VFLIP, 0, 1, 1, 0);
+	}
 
 	if (ctrl_hdlr->error) {
 		v4l2_ctrl_handler_free(ctrl_hdlr);
@@ -857,12 +1157,13 @@ error:
 	return ret;
 }
 
-static void ov5675_update_pad_format(const struct ov5675_mode *mode,
+static void ov5675_update_pad_format(struct ov5675 *ov5675,
+				     const struct ov5675_mode *mode,
 				     struct v4l2_mbus_framefmt *fmt)
 {
 	fmt->width = mode->width;
 	fmt->height = mode->height;
-	fmt->code = MEDIA_BUS_FMT_SGRBG10_1X10;
+	fmt->code = ov5675->config->mbus_code;
 	fmt->field = V4L2_FIELD_NONE;
 }
 
@@ -901,6 +1202,8 @@ static int ov5675_start_streaming(struct ov5675 *ov5675)
 
 	link_freq_index = ov5675->cur_mode->link_freq_index;
 	reg_list = &link_freq_configs[link_freq_index].reg_list;
+	if (ov5675->config == &ov5675_sweet_config)
+		reg_list = &sweet_init;
 	ret = ov5675_write_reg_list(ov5675, reg_list);
 	if (ret) {
 		dev_err(ov5675->dev, "failed to set plls");
@@ -915,13 +1218,15 @@ static int ov5675_start_streaming(struct ov5675 *ov5675)
 	}
 
 	ret = __v4l2_ctrl_handler_setup(ov5675->sd.ctrl_handler);
-	if (ret)
+	if (ret) {
+		dev_err(ov5675->dev, "failed to apply controls: %d\n", ret);
 		return ret;
+	}
 
 	ret = ov5675_write_reg(ov5675, OV5675_REG_MODE_SELECT,
 			       OV5675_REG_VALUE_08BIT, OV5675_MODE_STREAMING);
 	if (ret) {
-		dev_err(ov5675->dev, "failed to set stream");
+		dev_err(ov5675->dev, "failed to set stream: %d\n", ret);
 		return ret;
 	}
 
@@ -944,12 +1249,14 @@ static int ov5675_set_stream(struct v4l2_subdev *sd, int enable)
 	if (enable) {
 		ret = pm_runtime_resume_and_get(ov5675->dev);
 		if (ret < 0) {
+			dev_err(ov5675->dev, "runtime resume failed: %d\n", ret);
 			mutex_unlock(&ov5675->mutex);
 			return ret;
 		}
 
 		ret = ov5675_start_streaming(ov5675);
 		if (ret) {
+			dev_err(ov5675->dev, "stream-on failed: %d\n", ret);
 			enable = 0;
 			ov5675_stop_streaming(ov5675);
 			pm_runtime_put(ov5675->dev);
@@ -964,6 +1271,55 @@ static int ov5675_set_stream(struct v4l2_subdev *sd, int enable)
 	return ret;
 }
 
+static const unsigned int ov5675_sweet_supply_order[] = {
+	OV5675_SUPPLY_DVDD,
+	OV5675_SUPPLY_AVDD,
+	OV5675_SUPPLY_DOVDD,
+};
+
+static int ov5675_sweet_power_on(struct ov5675 *ov5675)
+{
+	int i, ret;
+
+	gpiod_set_value_cansleep(ov5675->reset_gpio, 1);
+	for (i = 0; i < ARRAY_SIZE(ov5675_sweet_supply_order); i++) {
+		ret = regulator_enable(ov5675->supplies[
+				ov5675_sweet_supply_order[i]].consumer);
+		if (ret) {
+			dev_err(ov5675->dev, "enable %s failed: %d\n",
+				ov5675->supplies[ov5675_sweet_supply_order[i]].supply,
+				ret);
+			goto disable_supplies;
+		}
+		usleep_range(1000, 1200);
+	}
+
+	gpiod_set_value_cansleep(ov5675->mipi_switch_gpio, 1);
+	usleep_range(5000, 5500);
+	gpiod_set_value_cansleep(ov5675->reset_gpio, 0);
+	usleep_range(7000, 7500);
+
+	/* The sweet module releases reset before starting MCLK. */
+	ret = clk_prepare_enable(ov5675->xvclk);
+	if (ret) {
+		dev_err(ov5675->dev, "enable MCLK failed: %d\n", ret);
+		goto reset_sensor;
+	}
+	usleep_range(1000, 1200);
+
+	return 0;
+
+reset_sensor:
+	gpiod_set_value_cansleep(ov5675->reset_gpio, 1);
+	gpiod_set_value_cansleep(ov5675->mipi_switch_gpio, 0);
+disable_supplies:
+	while (i--)
+		regulator_disable(ov5675->supplies[
+				ov5675_sweet_supply_order[i]].consumer);
+
+	return ret;
+}
+
 static int ov5675_power_off(struct device *dev)
 {
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
@@ -973,7 +1329,16 @@ static int ov5675_power_off(struct device *dev)
 
 	clk_disable_unprepare(ov5675->xvclk);
 	gpiod_set_value_cansleep(ov5675->reset_gpio, 1);
-	regulator_bulk_disable(OV5675_NUM_SUPPLIES, ov5675->supplies);
+	if (ov5675->config == &ov5675_sweet_config) {
+		int i;
+
+		gpiod_set_value_cansleep(ov5675->mipi_switch_gpio, 0);
+		for (i = ARRAY_SIZE(ov5675_sweet_supply_order) - 1; i >= 0; i--)
+			regulator_disable(ov5675->supplies[
+					ov5675_sweet_supply_order[i]].consumer);
+	} else {
+		regulator_bulk_disable(OV5675_NUM_SUPPLIES, ov5675->supplies);
+	}
 
 	return 0;
 }
@@ -983,6 +1348,9 @@ static int ov5675_power_on(struct device *dev)
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct ov5675 *ov5675 = to_ov5675(sd);
 	int ret;
+
+	if (ov5675->config == &ov5675_sweet_config)
+		return ov5675_sweet_power_on(ov5675);
 
 	ret = clk_prepare_enable(ov5675->xvclk);
 	if (ret < 0) {
@@ -1022,13 +1390,13 @@ static int ov5675_set_format(struct v4l2_subdev *sd,
 	const struct ov5675_mode *mode;
 	s32 vblank_def, h_blank;
 
-	mode = v4l2_find_nearest_size(supported_modes,
-				      ARRAY_SIZE(supported_modes), width,
+	mode = v4l2_find_nearest_size(ov5675->config->modes,
+				      ov5675->config->num_modes, width,
 				      height, fmt->format.width,
 				      fmt->format.height);
 
 	mutex_lock(&ov5675->mutex);
-	ov5675_update_pad_format(mode, &fmt->format);
+	ov5675_update_pad_format(ov5675, mode, &fmt->format);
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		*v4l2_subdev_state_get_format(sd_state, fmt->pad) = fmt->format;
 	} else {
@@ -1066,7 +1434,7 @@ static int ov5675_get_format(struct v4l2_subdev *sd,
 		fmt->format = *v4l2_subdev_state_get_format(sd_state,
 							    fmt->pad);
 	else
-		ov5675_update_pad_format(ov5675->cur_mode, &fmt->format);
+		ov5675_update_pad_format(ov5675, ov5675->cur_mode, &fmt->format);
 
 	mutex_unlock(&ov5675->mutex);
 
@@ -1077,8 +1445,36 @@ static int ov5675_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *state,
 				struct v4l2_subdev_selection *sel)
 {
+	struct ov5675 *ov5675 = to_ov5675(sd);
+
 	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
 		return -EINVAL;
+
+	if (ov5675->config == &ov5675_sweet_config) {
+		const struct ov5675_mode *mode;
+
+		mutex_lock(&ov5675->mutex);
+		mode = ov5675->cur_mode;
+		switch (sel->target) {
+		case V4L2_SEL_TGT_CROP_BOUNDS:
+			sel->r = (struct v4l2_rect) { 0, 0, 2624, 2000 };
+			break;
+		case V4L2_SEL_TGT_CROP:
+		case V4L2_SEL_TGT_CROP_DEFAULT:
+			sel->r = (struct v4l2_rect) {
+				.left = 16,
+				.top = mode->height == 1944 ? 16 : 260,
+				.width = mode->width,
+				.height = mode->height,
+			};
+			break;
+		default:
+			mutex_unlock(&ov5675->mutex);
+			return -EINVAL;
+		}
+		mutex_unlock(&ov5675->mutex);
+		return 0;
+	}
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP_BOUNDS:
@@ -1105,7 +1501,7 @@ static int ov5675_enum_mbus_code(struct v4l2_subdev *sd,
 	if (code->index > 0)
 		return -EINVAL;
 
-	code->code = MEDIA_BUS_FMT_SGRBG10_1X10;
+	code->code = to_ov5675(sd)->config->mbus_code;
 
 	return 0;
 }
@@ -1114,15 +1510,15 @@ static int ov5675_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	if (fse->index >= ARRAY_SIZE(supported_modes))
+	if (fse->index >= to_ov5675(sd)->config->num_modes)
 		return -EINVAL;
 
-	if (fse->code != MEDIA_BUS_FMT_SGRBG10_1X10)
+	if (fse->code != to_ov5675(sd)->config->mbus_code)
 		return -EINVAL;
 
-	fse->min_width = supported_modes[fse->index].width;
+	fse->min_width = to_ov5675(sd)->config->modes[fse->index].width;
 	fse->max_width = fse->min_width;
-	fse->min_height = supported_modes[fse->index].height;
+	fse->min_height = to_ov5675(sd)->config->modes[fse->index].height;
 	fse->max_height = fse->min_height;
 
 	return 0;
@@ -1133,7 +1529,7 @@ static int ov5675_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct ov5675 *ov5675 = to_ov5675(sd);
 
 	mutex_lock(&ov5675->mutex);
-	ov5675_update_pad_format(&supported_modes[0],
+	ov5675_update_pad_format(ov5675, &ov5675->config->modes[0],
 				 v4l2_subdev_state_get_format(fh->state, 0));
 	mutex_unlock(&ov5675->mutex);
 
@@ -1210,6 +1606,16 @@ static int ov5675_get_hwcfg(struct ov5675 *ov5675)
 		goto check_hwcfg_error;
 	}
 
+	if (ov5675->config == &ov5675_sweet_config) {
+		ov5675->mipi_switch_gpio = devm_gpiod_get(dev, "mipi-switch",
+						       GPIOD_OUT_LOW);
+		if (IS_ERR(ov5675->mipi_switch_gpio)) {
+			ret = dev_err_probe(dev, PTR_ERR(ov5675->mipi_switch_gpio),
+					    "failed to get MIPI switch GPIO\n");
+			goto check_hwcfg_error;
+		}
+	}
+
 	for (i = 0; i < OV5675_NUM_SUPPLIES; i++)
 		ov5675->supplies[i].supply = ov5675_supply_names[i];
 
@@ -1279,6 +1685,9 @@ static int ov5675_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	ov5675->dev = &client->dev;
+	ov5675->config = device_get_match_data(ov5675->dev);
+	if (!ov5675->config)
+		ov5675->config = &ov5675_generic_config;
 
 	ret = ov5675_get_hwcfg(ov5675);
 	if (ret)
@@ -1302,7 +1711,7 @@ static int ov5675_probe(struct i2c_client *client)
 	}
 
 	mutex_init(&ov5675->mutex);
-	ov5675->cur_mode = &supported_modes[0];
+	ov5675->cur_mode = &ov5675->config->modes[0];
 	ret = ov5675_init_controls(ov5675);
 	if (ret) {
 		dev_err(ov5675->dev, "failed to init controls: %d", ret);
@@ -1361,7 +1770,9 @@ MODULE_DEVICE_TABLE(acpi, ov5675_acpi_ids);
 #endif
 
 static const struct of_device_id ov5675_of_match[] = {
-	{ .compatible = "ovti,ov5675", },
+	{ .compatible = "xiaomi,sweet-ov5675",
+	  .data = &ov5675_sweet_config },
+	{ .compatible = "ovti,ov5675", .data = &ov5675_generic_config },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, ov5675_of_match);

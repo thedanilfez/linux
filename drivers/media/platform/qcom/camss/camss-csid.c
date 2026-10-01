@@ -7,7 +7,6 @@
  * Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  * Copyright (C) 2015-2018 Linaro Ltd.
  */
-#define DEBUG
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/interrupt.h>
@@ -778,9 +777,6 @@ static int csid_set_stream(struct v4l2_subdev *sd, int enable)
 			return -ENOLINK;
 	}
 
-	if (!enable && csid->res->hw_ops == &csid_ops_gen2)
-		csid_gen2_dump_registers(csid, "before-stream-off");
-
 	if (csid->phy.need_vc_update) {
 		csid->res->hw_ops->configure_stream(csid, enable);
 		csid->phy.need_vc_update = false;
@@ -1055,10 +1051,8 @@ static int csid_set_test_pattern(struct csid_device *csid, s32 value)
 	struct csid_testgen_config *tg = &csid->testgen;
 
 	/* If CSID is linked to CSIPHY, do not allow to enable test generator */
-	if (value && media_pad_remote_pad_first(&csid->pads[MSM_CSID_PAD_SINK])) {
-		printk("csid_set_test_pattern\n");
+	if (value && media_pad_remote_pad_first(&csid->pads[MSM_CSID_PAD_SINK]))
 		return -EBUSY;
-	}
 
 	tg->enabled = !!value;
 
@@ -1257,10 +1251,8 @@ static int csid_link_setup(struct media_entity *entity,
 			   const struct media_pad *remote, u32 flags)
 {
 	if (flags & MEDIA_LNK_FL_ENABLED)
-		if (media_pad_remote_pad_first(local)) {
-			printk("csid_link_setup media_pad_remote_pad_first\n");
+		if (media_pad_remote_pad_first(local))
 			return -EBUSY;
-		}
 
 	if ((local->flags & MEDIA_PAD_FL_SINK) &&
 	    (flags & MEDIA_LNK_FL_ENABLED)) {
@@ -1276,10 +1268,8 @@ static int csid_link_setup(struct media_entity *entity,
 		/* If test generator is enabled */
 		/* do not allow a link from CSIPHY to CSID */
 		if (csid->testgen.nmodes != CSID_PAYLOAD_MODE_DISABLED &&
-		    csid->testgen_mode->cur.val != 0) {
-			printk("csid_link_setup test generator\n");
+		    csid->testgen_mode->cur.val != 0)
 			return -EBUSY;
-		}
 
 		sd = media_entity_to_v4l2_subdev(remote->entity);
 		if (sd->grp_id == TPG_GRP_ID) {
