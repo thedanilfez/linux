@@ -778,6 +778,9 @@ static int csid_set_stream(struct v4l2_subdev *sd, int enable)
 			return -ENOLINK;
 	}
 
+	if (!enable && csid->res->hw_ops == &csid_ops_gen2)
+		csid_gen2_dump_registers(csid, "before-stream-off");
+
 	if (csid->phy.need_vc_update) {
 		csid->res->hw_ops->configure_stream(csid, enable);
 		csid->phy.need_vc_update = false;

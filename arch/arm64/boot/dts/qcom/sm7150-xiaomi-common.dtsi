@@ -481,6 +481,7 @@
 };
 
 &camss {
+	refgen-supply = <&refgen>;
 	vdda-phy-supply = <&vdda_mipi_csi0_0p9>;
 	vdda-pll-supply = <&vdda_csi0_1p25>;
 	status = "okay";
