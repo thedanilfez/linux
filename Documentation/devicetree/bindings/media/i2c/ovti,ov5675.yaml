@@ -12,6 +12,18 @@ maintainers:
 
 allOf:
   - $ref: /schemas/media/video-interface-devices.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: xiaomi,sweet-ov5675
+    then:
+      required:
+        - reset-gpios
+        - mipi-switch-gpios
+    else:
+      properties:
+        mipi-switch-gpios: false
 
 description: |
   The Omnivision OV5675 is a high performance, 1/5-inch, 5 megapixel, CMOS
@@ -24,7 +36,11 @@ description: |
 
 properties:
   compatible:
-    const: ovti,ov5675
+    oneOf:
+      - const: ovti,ov5675
+      - items:
+          - const: xiaomi,sweet-ov5675
+          - const: ovti,ov5675
 
   reg:
     maxItems: 1
@@ -51,6 +67,13 @@ properties:
       The phandle and specifier for the GPIO that controls sensor reset.
       This corresponds to the hardware pin XSHUTDN which is physically
       active low.
+    maxItems: 1
+
+  mipi-switch-gpios:
+    description:
+      Selects the macro sensor on the CSI switch shared with the depth
+      camera on Xiaomi sweet. High selects OV5675, low selects the depth
+      camera.
     maxItems: 1
 
   port:
