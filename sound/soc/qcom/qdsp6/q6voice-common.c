@@ -1,25 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (c) 2026 thedanilfez <thedanilfezlol@gmail.com>
- * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
- * Copyright (c) 2020, Stephan Gerhold
- *
- * Common APR transport for the QDSP6 Voice Services (MVM/CVS/CVP).
- *
- * The transport deliberately keeps request/response correlation explicit:
- *
- *  - A session-targeted command is completed only by an APR_BASIC_RSP_RESULT
- *    whose payload opcode matches the command that was sent *and* whose
- *    ``src_port`` matches the session handle. Intermediate responses such as
- *    APR_RSP_ACCEPTED are ignored instead of being mistaken for the reply.
- *
- *  - A service-level (sessionless) request is completed only by the exact
- *    response opcode it expects (for a command response) or by a basic result
- *    for the requested opcode. Nothing else can complete it.
- *
- *  - A session handle is captured from ``src_port`` of a *successful* create
- *    reply only. A failed create never leaves a bogus handle behind.
- */
+// Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+// Copyright (c) 2020, Stephan Gerhold
 
 #define CREATE_TRACE_POINTS
 #include "q6voice-common.h"
@@ -33,11 +14,6 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 
-/*
- * Timeout for a synchronous voice command. The vendor stack uses 1000 ms; the
- * DSP occasionally takes considerably longer than 300 ms to create a vocproc
- * on a busy ADSP, so stay on the vendor value.
- */
 #define Q6VOICE_TIMEOUT_MS	1000
 
 /* Largest response payload we need to buffer (VSS version string) */

@@ -1,8 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (c) 2026 thedanilfez <thedanilfezlol@gmail.com>
- * Copyright (c) 2020 Stephan Gerhold
- */
+// SPDX-License-Identifier: GPL-2.0 */
+// Copyright (c) 2020 Stephan Gerhold
 
 #ifndef _Q6_CVP_H
 #define _Q6_CVP_H
@@ -19,11 +16,6 @@ struct q6voice_session;
 /* "no port" / "no EC reference" */
 #define VSS_IVOCPROC_PORT_ID_NONE	0xFFFF
 
-/*
- * Built-in processing topologies compiled into the ADSP firmware. They do not
- * require ACDB calibration data; the vendor stack substitutes per-device
- * topologies probed from ACDB when it is available.
- */
 #define VSS_IVOCPROC_TOPOLOGY_ID_NONE			0x00010F70
 #define VSS_IVOCPROC_TOPOLOGY_ID_TX_SM_ECNS		0x00010F71
 #define VSS_IVOCPROC_TOPOLOGY_ID_TX_DM_FLUENCE		0x00010F72
@@ -66,17 +58,6 @@ enum q6cvp_create_version {
 	Q6CVP_CREATE_V3,
 };
 
-/**
- * struct q6cvp_config - vocproc device configuration
- *
- * @tx_port_id: QDSP6 AFE port ID for the uplink path
- * @rx_port_id: QDSP6 AFE port ID for the downlink path
- * @tx_topology_id: uplink topology (see VSS_IVOCPROC_TOPOLOGY_ID_*)
- * @rx_topology_id: downlink topology
- * @vocproc_mode: VSS_IVOCPROC_VOCPROC_MODE_*
- * @ec_ref_port_id: AFE port ID used as external EC reference, or
- *	VSS_IVOCPROC_PORT_ID_NONE for internal mixing
- */
 struct q6cvp_config {
 	u16 tx_port_id;
 	u16 rx_port_id;

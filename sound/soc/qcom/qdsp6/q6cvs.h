@@ -1,8 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (c) 2026 thedanilfez <thedanilfezlol@gmail.com>
- * Copyright (c) 2020 Stephan Gerhold
- */
+// SPDX-License-Identifier: GPL-2.0 */
+// Copyright (c) 2020 Stephan Gerhold
 
 #ifndef _Q6_CVS_H
 #define _Q6_CVS_H

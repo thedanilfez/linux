@@ -146,15 +146,6 @@ int q6dsp_clock_dev_probe(struct platform_device *pdev)
 	cc->dev = dev;
 	q6dsp_clks = desc->clks;
 
-	/*
-	 * Publish the driver data before registering any clock. Registering a
-	 * clock makes it a candidate parent for already-registered orphan
-	 * clocks; if such an orphan is prepared, the clock core reparents and
-	 * prepares it immediately, which calls into clk_q6dsp_prepare() and
-	 * dereferences the driver data. This is reachable on every ADSP
-	 * recovery, where the q6afe clock provider is re-probed after the
-	 * LPASS clocks have been in use.
-	 */
 	dev_set_drvdata(dev, cc);
 
 	for (i = 0; i < desc->num_clks; i++) {

@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (c) 2026 thedanilfez <thedanilfezlol@gmail.com>
- * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
- * Copyright (c) 2020, Stephan Gerhold
- *
- * CVS - Core Voice Stream (ADSP voice service 0x0A).
- *
- * For modem-controlled calls (CS voice, VoLTE) the vocoder stream itself is
- * created by the modem. The AP only requests a passive-control handle so that
- * the DSP ties the vocproc attached through MVM to the modem-owned stream.
- * Only the AP-owned VoIP path creates a full-control stream.
- */
+// Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+// Copyright (c) 2020, Stephan Gerhold
 
 #include <linux/module.h>
 #include <linux/of.h>
