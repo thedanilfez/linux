@@ -1997,8 +1997,10 @@ static const struct camss_subdev_resources csiphy_res_7150[] = {
 			{ .supply = "vdda-pll", .init_load_uA = 0 },
 			{ .supply = "refgen", .init_load_uA = 0 }
 		},
-		.clock = { "csiphy2", "csiphy2_timer" },
-		.clock_rate = { { 19200000, 300000000, 384000000, 400000000 },
+		/* CSIPHY2 also requires the shared CSIPHY0 clock. */
+		.clock = { "csiphy0", "csiphy2", "csiphy2_timer" },
+		.clock_rate = { { 0 },
+				{ 19200000, 300000000, 384000000, 400000000 },
 				{ 300000000 } },
 		.reg = { "csiphy2" },
 		.interrupt = { "csiphy2" },
