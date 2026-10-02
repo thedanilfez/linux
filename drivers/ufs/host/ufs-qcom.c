@@ -15,6 +15,7 @@
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
+#include <linux/regulator/consumer.h>
 #include <linux/reset-controller.h>
 #include <linux/time.h>
 #include <linux/unaligned.h>
@@ -1575,6 +1576,13 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	/* Make a two way bind between the qcom host and the hba */
 	host->hba = hba;
 	ufshcd_set_variant(hba, host);
+
+	/* Keep the reference clock pad supply powered during Hibern8. */
+	err = devm_regulator_get_enable_optional(dev, "vddp-ref-clk");
+	if (err && err != -ENODEV) {
+		err = dev_err_probe(dev, err, "Failed to enable reference clock supply\n");
+		goto out_variant_clear;
+	}
 
 	/* Setup the optional reset control of HCI */
 	host->core_reset = devm_reset_control_get_optional(hba->dev, "rst");

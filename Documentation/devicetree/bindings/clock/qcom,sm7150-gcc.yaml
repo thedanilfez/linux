@@ -27,6 +27,10 @@ properties:
       - description: Board XO Active-Only source
       - description: Sleep clock source
 
+  power-domains:
+    maxItems: 1
+    description: CX power domain
+
 required:
   - compatible
   - clocks
