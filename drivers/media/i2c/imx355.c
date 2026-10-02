@@ -65,6 +65,7 @@
 #define IMX355_LINK_FREQ_DEFAULT	360000000LL
 #define IMX355_EXT_CLK			19200000
 #define IMX355_LINK_FREQ_INDEX		0
+#define IMX355_LINK_FREQ_345MHZ_INDEX	1
 
 /* number of data lanes */
 #define IMX355_DATA_LANES		4
@@ -123,6 +124,9 @@ struct imx355 {
 
 	/* Current mode */
 	const struct imx355_mode *cur_mode;
+	const struct imx355_mode *modes;
+	unsigned int num_modes;
+	const struct imx355_reg_list *global_setting;
 
 	struct imx355_hwcfg *hwcfg;
 
@@ -201,6 +205,108 @@ static const struct imx355_reg imx355_global_regs[] = {
 static const struct imx355_reg_list imx355_global_setting = {
 	.num_of_regs = ARRAY_SIZE(imx355_global_regs),
 	.regs = imx355_global_regs,
+};
+
+/* The 345.6 MHz operating point uses tuning from downstream. */
+static const struct imx355_reg imx355_345mhz_global_regs[] = {
+	{ 0x0136, 0x13 },
+	{ 0x0137, 0x33 },
+	{ 0x0101, 0x00 },
+	{ 0x4348, 0x16 },
+	{ 0x4350, 0x19 },
+	{ 0x4408, 0x0a },
+	{ 0x440c, 0x0b },
+	{ 0x4411, 0x5f },
+	{ 0x4412, 0x2c },
+	{ 0x4623, 0x00 },
+	{ 0x462c, 0x0f },
+	{ 0x462d, 0x00 },
+	{ 0x462e, 0x00 },
+	{ 0x4684, 0x54 },
+	{ 0x480a, 0x07 },
+	{ 0x4908, 0x07 },
+	{ 0x4909, 0x07 },
+	{ 0x490d, 0x0a },
+	{ 0x491e, 0x0f },
+	{ 0x4921, 0x06 },
+	{ 0x4923, 0x28 },
+	{ 0x4924, 0x28 },
+	{ 0x4925, 0x29 },
+	{ 0x4926, 0x29 },
+	{ 0x4927, 0x1f },
+	{ 0x4928, 0x20 },
+	{ 0x4929, 0x20 },
+	{ 0x492a, 0x20 },
+	{ 0x492c, 0x05 },
+	{ 0x492d, 0x06 },
+	{ 0x492e, 0x06 },
+	{ 0x492f, 0x06 },
+	{ 0x4930, 0x03 },
+	{ 0x4931, 0x04 },
+	{ 0x4932, 0x04 },
+	{ 0x4933, 0x05 },
+	{ 0x595e, 0x01 },
+	{ 0x5963, 0x01 },
+};
+
+static const struct imx355_reg_list imx355_345mhz_global_setting = {
+	.num_of_regs = ARRAY_SIZE(imx355_345mhz_global_regs),
+	.regs = imx355_345mhz_global_regs,
+};
+
+static const struct imx355_reg mode_3280x2464_345mhz_regs[] = {
+	{ 0x0112, 0x0a },
+	{ 0x0113, 0x0a },
+	{ 0x0114, 0x03 },
+	{ 0x0342, 0x0e },
+	{ 0x0343, 0x58 },
+	{ 0x0340, 0x09 },
+	{ 0x0341, 0xcc },
+	{ 0x0344, 0x00 },
+	{ 0x0345, 0x00 },
+	{ 0x0346, 0x00 },
+	{ 0x0347, 0x00 },
+	{ 0x0348, 0x0c },
+	{ 0x0349, 0xcf },
+	{ 0x034a, 0x09 },
+	{ 0x034b, 0x9f },
+	{ 0x0220, 0x00 },
+	{ 0x0222, 0x01 },
+	{ 0x0900, 0x00 },
+	{ 0x0901, 0x11 },
+	{ 0x0902, 0x00 },
+	{ 0x034c, 0x0c },
+	{ 0x034d, 0xd0 },
+	{ 0x034e, 0x09 },
+	{ 0x034f, 0xa0 },
+	{ 0x0301, 0x05 },
+	{ 0x0303, 0x01 },
+	{ 0x0305, 0x02 },
+	{ 0x0306, 0x00 },
+	{ 0x0307, 0x78 },
+	{ 0x030b, 0x01 },
+	{ 0x030d, 0x03 },
+	{ 0x030e, 0x00 },
+	{ 0x030f, 0x6c },
+	{ 0x0310, 0x00 },
+	{ 0x0700, 0x00 },
+	{ 0x0701, 0x10 },
+	{ 0x0820, 0x0a },
+	{ 0x0821, 0xcc },
+	{ 0x3088, 0x04 },
+	{ 0x6813, 0x02 },
+	{ 0x6835, 0x00 },
+	{ 0x6836, 0x00 },
+	{ 0x6837, 0x04 },
+	{ 0x684d, 0x00 },
+	{ 0x684e, 0x00 },
+	{ 0x684f, 0x04 },
+	{ 0x0202, 0x09 },
+	{ 0x0203, 0xc2 },
+	{ 0x0204, 0x00 },
+	{ 0x0205, 0x00 },
+	{ 0x020e, 0x01 },
+	{ 0x020f, 0x00 },
 };
 
 static const struct imx355_reg mode_3268x2448_regs[] = {
@@ -897,12 +1003,9 @@ static const char * const imx355_test_pattern_menu[] = {
 	"Pseudorandom Sequence (PN9)",
 };
 
-/*
- * When adding more than the one below, make sure the disallowed ones will
- * actually be disabled in the LINK_FREQ control.
- */
 static const s64 link_freq_menu_items[] = {
 	IMX355_LINK_FREQ_DEFAULT,
+	345600000,
 };
 
 /* Mode configs */
@@ -1073,6 +1176,21 @@ static const struct imx355_mode supported_modes[] = {
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_820x616_regs),
 			.regs = mode_820x616_regs,
+		},
+	},
+};
+
+static const struct imx355_mode supported_modes_345mhz[] = {
+	{
+		.width = 3280,
+		.height = 2464,
+		.fll_def = 2508,
+		.fll_min = 2508,
+		.llp = 3672,
+		.link_freq_index = IMX355_LINK_FREQ_345MHZ_INDEX,
+		.reg_list = {
+			.num_of_regs = ARRAY_SIZE(mode_3280x2464_345mhz_regs),
+			.regs = mode_3280x2464_345mhz_regs,
 		},
 	},
 };
@@ -1285,7 +1403,7 @@ static int imx355_enum_frame_size(struct v4l2_subdev *sd,
 {
 	struct imx355 *imx355 = to_imx355(sd);
 
-	if (fse->index >= ARRAY_SIZE(supported_modes))
+	if (fse->index >= imx355->num_modes)
 		return -EINVAL;
 
 	mutex_lock(&imx355->mutex);
@@ -1295,9 +1413,9 @@ static int imx355_enum_frame_size(struct v4l2_subdev *sd,
 	}
 	mutex_unlock(&imx355->mutex);
 
-	fse->min_width = supported_modes[fse->index].width;
+	fse->min_width = imx355->modes[fse->index].width;
 	fse->max_width = fse->min_width;
-	fse->min_height = supported_modes[fse->index].height;
+	fse->min_height = imx355->modes[fse->index].height;
 	fse->max_height = fse->min_height;
 
 	return 0;
@@ -1365,8 +1483,8 @@ imx355_set_pad_format(struct v4l2_subdev *sd,
 	 */
 	fmt->format.code = imx355_get_format_code(imx355);
 
-	mode = v4l2_find_nearest_size(supported_modes,
-				      ARRAY_SIZE(supported_modes),
+	mode = v4l2_find_nearest_size(imx355->modes,
+				      imx355->num_modes,
 				      width, height,
 				      fmt->format.width, fmt->format.height);
 	imx355_update_pad_format(imx355, mode, fmt);
@@ -1375,7 +1493,8 @@ imx355_set_pad_format(struct v4l2_subdev *sd,
 		*framefmt = fmt->format;
 	} else {
 		imx355->cur_mode = mode;
-		pixel_rate = IMX355_LINK_FREQ_DEFAULT * 2 * 4;
+		pixel_rate = link_freq_menu_items[imx355->cur_mode->link_freq_index] *
+			     2 * IMX355_DATA_LANES;
 		do_div(pixel_rate, 10);
 		__v4l2_ctrl_s_ctrl_int64(imx355->pixel_rate, pixel_rate);
 		/* Update limits and set FPS to default */
@@ -1407,7 +1526,7 @@ static int imx355_start_streaming(struct imx355 *imx355)
 	int ret;
 
 	/* Global Setting */
-	reg_list = &imx355_global_setting;
+	reg_list = imx355->global_setting;
 	ret = imx355_write_regs(imx355, reg_list->regs, reg_list->num_of_regs);
 	if (ret) {
 		dev_err(imx355->dev, "failed to set global settings");
@@ -1536,11 +1655,13 @@ static int imx355_power_off(struct device *dev)
 	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx355 *imx355 = to_imx355(sd);
+	int i;
 
 	gpiod_set_value_cansleep(imx355->reset_gpio, 1);
 
-	regulator_bulk_disable(ARRAY_SIZE(imx355_supplies), imx355->supplies);
 	clk_disable_unprepare(imx355->clk);
+	for (i = ARRAY_SIZE(imx355_supplies) - 1; i >= 0; i--)
+		regulator_disable(imx355->supplies[i].consumer);
 
 	return 0;
 }
@@ -1550,27 +1671,32 @@ static int imx355_power_on(struct device *dev)
 	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx355 *imx355 = to_imx355(sd);
-	int ret;
+	int i, ret;
 
-	ret = clk_prepare_enable(imx355->clk);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to enable clocks");
-
-	ret = regulator_bulk_enable(ARRAY_SIZE(imx355_supplies),
-				    imx355->supplies);
-	if (ret) {
-		dev_err_probe(dev, ret, "failed to enable regulators");
-		goto error_disable_clocks;
+	for (i = 0; i < ARRAY_SIZE(imx355_supplies); i++) {
+		ret = regulator_enable(imx355->supplies[i].consumer);
+		if (ret) {
+			dev_err_probe(dev, ret, "failed to enable %s\n",
+				      imx355->supplies[i].supply);
+			goto error_disable_regulators;
+		}
 	}
 
-	usleep_range(1000, 2000);
+	usleep_range(10000, 11000);
+	ret = clk_prepare_enable(imx355->clk);
+	if (ret) {
+		dev_err_probe(dev, ret, "failed to enable clock\n");
+		goto error_disable_regulators;
+	}
+
 	gpiod_set_value_cansleep(imx355->reset_gpio, 0);
 	usleep_range(10000, 11000);
 
 	return 0;
 
-error_disable_clocks:
-	clk_disable_unprepare(imx355->clk);
+error_disable_regulators:
+	while (i--)
+		regulator_disable(imx355->supplies[i].consumer);
 	return ret;
 }
 
@@ -1583,6 +1709,7 @@ static int imx355_init_controls(struct imx355 *imx355)
 	struct v4l2_fwnode_device_properties props;
 	struct v4l2_ctrl_handler *ctrl_hdlr;
 	s64 exposure_max;
+	s64 exposure_def;
 	s64 vblank_def;
 	s64 vblank_min;
 	s64 hblank;
@@ -1599,13 +1726,18 @@ static int imx355_init_controls(struct imx355 *imx355)
 	ctrl_hdlr->lock = &imx355->mutex;
 	max = ARRAY_SIZE(link_freq_menu_items) - 1;
 	imx355->link_freq = v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx355_ctrl_ops,
-						   V4L2_CID_LINK_FREQ, max, 0,
+						   V4L2_CID_LINK_FREQ, max,
+						   imx355->cur_mode->link_freq_index,
 						   link_freq_menu_items);
-	if (imx355->link_freq)
+	if (imx355->link_freq) {
 		imx355->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+		imx355->link_freq->menu_skip_mask =
+			GENMASK(max, 0) & ~BIT(imx355->cur_mode->link_freq_index);
+	}
 
 	/* pixel_rate = link_freq * 2 * nr_of_lanes / bits_per_sample */
-	pixel_rate = IMX355_LINK_FREQ_DEFAULT * 2 * 4;
+	pixel_rate = link_freq_menu_items[imx355->cur_mode->link_freq_index] *
+		     2 * IMX355_DATA_LANES;
 	do_div(pixel_rate, 10);
 	/* By default, PIXEL_RATE is read only */
 	imx355->pixel_rate = v4l2_ctrl_new_std(ctrl_hdlr, &imx355_ctrl_ops,
@@ -1630,11 +1762,13 @@ static int imx355_init_controls(struct imx355 *imx355)
 
 	/* fll >= exposure time + adjust parameter (default value is 10) */
 	exposure_max = mode->fll_def - 10;
+	exposure_def = mode->link_freq_index == IMX355_LINK_FREQ_345MHZ_INDEX ?
+		       exposure_max : IMX355_EXPOSURE_DEFAULT;
 	imx355->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &imx355_ctrl_ops,
 					     V4L2_CID_EXPOSURE,
 					     IMX355_EXPOSURE_MIN, exposure_max,
 					     IMX355_EXPOSURE_STEP,
-					     IMX355_EXPOSURE_DEFAULT);
+					     exposure_def);
 
 	imx355->hflip = v4l2_ctrl_new_std(ctrl_hdlr, &imx355_ctrl_ops,
 					  V4L2_CID_HFLIP, 0, 1, 1, 0);
@@ -1792,8 +1926,18 @@ static int imx355_probe(struct i2c_client *client)
 		goto error_power_off;
 	}
 
+	if (imx355->hwcfg->link_freq_bitmap & BIT(IMX355_LINK_FREQ_INDEX)) {
+		imx355->modes = supported_modes;
+		imx355->num_modes = ARRAY_SIZE(supported_modes);
+		imx355->global_setting = &imx355_global_setting;
+	} else {
+		imx355->modes = supported_modes_345mhz;
+		imx355->num_modes = ARRAY_SIZE(supported_modes_345mhz);
+		imx355->global_setting = &imx355_345mhz_global_setting;
+	}
+
 	/* Set default mode to max resolution */
-	imx355->cur_mode = &supported_modes[0];
+	imx355->cur_mode = &imx355->modes[0];
 
 	ret = imx355_init_controls(imx355);
 	if (ret) {

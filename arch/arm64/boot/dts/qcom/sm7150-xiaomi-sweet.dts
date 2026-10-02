@@ -351,6 +351,15 @@
 			};
 		};
 
+		port@2 {
+			reg = <2>;
+
+			csiphy2_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&imx355_ep>;
+			};
+		};
+
 		port@3 {
 			reg = <3>;
 
@@ -419,6 +428,42 @@
 				data-lanes = <0 1>;
 				link-frequencies = /bits/ 64 <450000000>;
 				remote-endpoint = <&csiphy3_ep>;
+			};
+		};
+	};
+};
+
+&cci1 {
+	status = "okay";
+};
+
+&cci1_i2c0 {
+	clock-frequency = <400000>;
+
+	camera@1a {
+		compatible = "xiaomi,sweet-imx355", "sony,imx355";
+		reg = <0x1a>;
+
+		clocks = <&camcc CAMCC_MCLK1_CLK>;
+		assigned-clocks = <&camcc CAMCC_MCLK1_CLK>;
+		assigned-clock-rates = <19200000>;
+
+		reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
+		avdd-supply = <&avdd2>;
+		dvdd-supply = <&dvdd1>;
+		dovdd-supply = <&vreg_camera_vio>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&camera_ultra_reset &camera_mclk1>;
+
+		orientation = <1>;
+		rotation = <270>;
+
+		port {
+			imx355_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				link-frequencies = /bits/ 64 <345600000>;
+				remote-endpoint = <&csiphy2_ep>;
 			};
 		};
 	};
@@ -662,6 +707,20 @@
 		pins = "gpio13";
 		function = "cam_mclk";
 		drive-strength = <6>;
+		bias-disable;
+	};
+
+	camera_ultra_reset: camera-ultra-reset-state {
+		pins = "gpio25";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	camera_mclk1: camera-mclk1-state {
+		pins = "gpio14";
+		function = "cam_mclk";
+		drive-strength = <4>;
 		bias-disable;
 	};
 
