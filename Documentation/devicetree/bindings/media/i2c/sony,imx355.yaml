@@ -11,14 +11,19 @@ maintainers:
 
 description:
   The IMX355 sensor is a 3280x2464 image sensor, commonly found as the front
-  camera in smartphones.
+  camera in smartphones. On Xiaomi sweet, it is used as the rear ultra-wide
+  camera with a 345.6 MHz link frequency.
 
 allOf:
   - $ref: /schemas/media/video-interface-devices.yaml#
 
 properties:
   compatible:
-    const: sony,imx355
+    oneOf:
+      - const: sony,imx355
+      - items:
+          - const: xiaomi,sweet-imx355
+          - const: sony,imx355
 
   reg:
     maxItems: 1
