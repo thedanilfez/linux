@@ -23,6 +23,7 @@ select:
           - qcom,sm6115-ufshc
           - qcom,sm6125-ufshc
           - qcom,sm6350-ufshc
+          - qcom,sm7150-ufshc
           - qcom,sm8150-ufshc
   required:
     - compatible
@@ -46,6 +47,9 @@ properties:
   qcom,ice:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: phandle to the Inline Crypto Engine node
+
+  vddp-ref-clk-supply:
+    description: Supply for the device reference clock pads
 
   reg:
     minItems: 1

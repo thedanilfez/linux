@@ -919,6 +919,7 @@
 &ufs_mem_hc {
 	reset-gpios = <&tlmm 119 GPIO_ACTIVE_LOW>;
 
+	vddp-ref-clk-supply = <&vdda_ufs_1p2>;
 	vcc-supply = <&vreg_l19a_2p85>;
 	vcc-max-microamp = <600000>;
 	vccq2-supply = <&vreg_l12a_1p8>;
