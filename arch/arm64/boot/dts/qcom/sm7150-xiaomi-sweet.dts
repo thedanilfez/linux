@@ -591,8 +591,29 @@
 		};
 	};
 
+	haptics@5a {
+		compatible = "awinic,aw8624";
+		reg = <0x5a>;
+		interrupts-extended = <&pm6150l_gpios 10 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 4 GPIO_ACTIVE_LOW>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&haptics_reset_default &haptics_irq_default>;
+
+		awinic,f0-preset = <2050>;
+		awinic,f0-calibration-percent = <7>;
+		awinic,drive-level = <106>;
+		awinic,overdrive-level = <155>;
+		awinic,drive-time = <0xf06c>;
+		awinic,zero-cross-threshold = <0x08f8>;
+		awinic,brake-cycles = <3>;
+		awinic,tset = <0x11>;
+		awinic,bemf-upper-threshold = <0x0008>;
+		awinic,bemf-lower-threshold = <0x03f8>;
+		awinic,f0-trace-parameters = <9 5 1 15>;
+	};
+
 	/* lionsemi,ln8000 (charger) @ 51 */
-	/* awinic,aw8624 (haptics) @ 5a */
 	/* ti,bq2597x (charger) @ 66 */
 };
 
@@ -606,6 +627,17 @@
 
 &nfc_sleep {
 	pins = "gpio31", "gpio36", "gpio66";
+};
+
+&pm6150l_gpios {
+	haptics_irq_default: haptics-irq-default-state {
+		pins = "gpio10";
+		function = PMIC_GPIO_FUNC_NORMAL;
+		input-enable;
+		bias-pull-up;
+		power-source = <1>;
+		qcom,pull-up-strength = <PMIC_GPIO_PULL_UP_31P5>;
+	};
 };
 
 &pm6150l_flash {
@@ -697,6 +729,13 @@
 };
 
 &tlmm {
+	haptics_reset_default: haptics-reset-default-state {
+		pins = "gpio4";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
 	camera_front_reset: camera-front-reset-state {
 		pins = "gpio23";
 		function = "gpio";
