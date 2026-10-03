@@ -126,6 +126,18 @@ config INPUT_ATMEL_CAPTOUCH
 	  To compile this driver as a module, choose M here: the
 	  module will be called atmel_captouch.
 
+config INPUT_AW8624
+	tristate "Awinic AW8624 haptics support"
+	depends on I2C
+	select INPUT_FF_MEMLESS
+	select REGMAP_I2C
+	help
+	  Say Y to enable support for the Awinic AW8624 LRA haptics
+	  controller using continuous mode and rumble force feedback.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called aw8624.
+
 config INPUT_AW86927
 	tristate "Awinic AW86927 Haptic Driver Support"
 	depends on I2C && INPUT
