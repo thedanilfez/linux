@@ -91,6 +91,9 @@ enum smb_generation {
 #define OCP_CHARGER_BIT					BIT(1)
 #define SDP_CHARGER_BIT					BIT(0)
 
+#define USBIN_INT_RT_STS				0x310
+#define USBIN_PLUGIN_RT_STS_BIT			BIT(4)
+
 #define USBIN_CMD_IL					0x340
 #define USBIN_SUSPEND_BIT				BIT(0)
 
@@ -106,10 +109,12 @@ enum smb_generation {
 #define VCONN_OC_CFG_BIT				BIT(1)
 
 #define USBIN_OPTIONS_1_CFG				0x362
+#define HVDCP_AUTH_ALG_EN_CFG_BIT			BIT(6)
+#define HVDCP_AUTONOMOUS_MODE_EN_CFG_BIT		BIT(5)
 #define AUTO_SRC_DETECT_BIT				BIT(3)
 #define HVDCP_EN_BIT					BIT(2)
 
-#define USBIN_LOAD_CFG					0x65
+#define USBIN_LOAD_CFG					0x365
 #define ICL_OVERRIDE_AFTER_APSD_BIT			BIT(4)
 
 #define USBIN_ICL_OPTIONS				0x366
@@ -156,6 +161,9 @@ enum smb_generation {
 #define SMB5_SRC_RD_RA_VCONN_BIT			BIT(2)
 #define SMB5_AUDIO_ACCESS_RA_RA_BIT			BIT(0)
 
+#define SMB5_TYPE_C_MISC_STATUS			0x50B
+#define SMB5_CC_ATTACHED_BIT				BIT(0)
+
 /* Bits 2:0 match PMI8998 TYPE_C_INTRPT_ENB_SOFTWARE_CTRL */
 #define SMB5_TYPE_C_MODE_CFG				0x544
 #define SMB5_EN_TRY_SNK_BIT				BIT(4)
@@ -182,6 +190,9 @@ enum smb_generation {
 
 #define BARK_BITE_WDOG_PET				0x643
 #define BARK_BITE_WDOG_PET_BIT				BIT(0)
+
+#define AICL_CMD					0x644
+#define RERUN_AICL_BIT					BIT(0)
 
 #define WD_CFG						0x651
 #define WATCHDOG_TRIGGER_AFP_EN_BIT			BIT(7)
@@ -341,8 +352,10 @@ static int smb_apsd_get_charger_type(struct smb_chip *chip, int *val)
 
 	if (stat & CDP_CHARGER_BIT)
 		*val = POWER_SUPPLY_USB_TYPE_CDP;
-	else if (stat & (DCP_CHARGER_BIT | OCP_CHARGER_BIT | FLOAT_CHARGER_BIT))
+	else if (stat & (DCP_CHARGER_BIT | OCP_CHARGER_BIT))
 		*val = POWER_SUPPLY_USB_TYPE_DCP;
+	else if (stat & FLOAT_CHARGER_BIT)
+		*val = POWER_SUPPLY_USB_TYPE_UNKNOWN;
 	else /* SDP_CHARGER_BIT (or others) */
 		*val = POWER_SUPPLY_USB_TYPE_SDP;
 
@@ -363,7 +376,7 @@ static int smbx_ov_status(struct smb_chip *chip)
 		mask = SMB2_CHARGER_ERROR_STATUS_BAT_OV_BIT;
 		break;
 	case SMB5:
-		reg = BATTERY_CHARGER_STATUS_7;
+		reg = BATTERY_CHARGER_STATUS_2;
 		mask = SMB5_CHARGER_ERROR_STATUS_BAT_OV_BIT;
 		break;
 	}
@@ -490,31 +503,62 @@ static inline int smb_get_current_now(struct smb_chip *chip,
 	return rc;
 }
 
-static int smb_set_current_limit(struct smb_chip *chip, unsigned int val)
+static int smb_set_current_limit(struct smb_chip *chip, int val)
 {
+	unsigned int typec_stat, usb_stat, override = 0;
 	unsigned char val_raw;
+	int rc;
 
-	if (val > chip->current_limit_max_ua) {
+	if (val < 0 || val > min(chip->current_limit_max_ua, CURRENT_MAX_UA)) {
 		dev_err(chip->dev,
-			"Can't set current limit higher than %u uA\n", chip->current_limit_max_ua);
+			"Invalid USB input current limit: %d uA\n", val);
 		return -EINVAL;
 	}
 	val_raw = val / chip->current_step_size_ua;
 
-	return regmap_write(chip->regmap, chip->base + USBIN_CURRENT_LIMIT_CFG,
-			    val_raw);
+	if (chip->gen == SMB5) {
+		rc = regmap_read(chip->regmap,
+				 chip->base + SMB5_TYPE_C_MISC_STATUS, &typec_stat);
+		if (rc < 0)
+			return rc;
+
+		rc = regmap_read(chip->regmap, chip->base + USBIN_INT_RT_STS,
+				 &usb_stat);
+		if (rc < 0)
+			return rc;
+
+		if (!(typec_stat & SMB5_CC_ATTACHED_BIT) &&
+		    (usb_stat & USBIN_PLUGIN_RT_STS_BIT))
+			override = ICL_OVERRIDE_BIT;
+	}
+
+	rc = regmap_write(chip->regmap, chip->base + USBIN_CURRENT_LIMIT_CFG,
+			  val_raw);
+	if (rc < 0 || chip->gen != SMB5)
+		return rc;
+
+	/* A present input without CC detection needs the command override. */
+	rc = regmap_update_bits(chip->regmap, chip->base + CMD_ICL_OVERRIDE,
+				ICL_OVERRIDE_BIT, override);
+	if (rc < 0 || !override)
+		return rc;
+
+	return regmap_write_bits(chip->regmap, chip->base + AICL_CMD,
+				 RERUN_AICL_BIT, RERUN_AICL_BIT);
 }
 
 static void smb_status_change_work(struct work_struct *work)
 {
-	unsigned int charger_type, current_ua;
+	int charger_type, current_ua;
 	int usb_online = 0;
 	int count, rc;
 	struct smb_chip *chip;
 
 	chip = container_of(work, struct smb_chip, status_change_work.work);
 
-	smb_get_prop_usb_online(chip, &usb_online);
+	rc = smb_get_prop_usb_online(chip, &usb_online);
+	if (rc < 0)
+		return;
 	if (!usb_online)
 		return;
 
@@ -534,6 +578,10 @@ static void smb_status_change_work(struct work_struct *work)
 	if (rc < 0) {
 		rc = regmap_update_bits(chip->regmap, chip->base + CMD_APSD,
 					APSD_RERUN_BIT, APSD_RERUN_BIT);
+		if (rc < 0) {
+			dev_err(chip->dev, "Couldn't rerun APSD: %d\n", rc);
+			return;
+		}
 		schedule_delayed_work(&chip->status_change_work,
 				      msecs_to_jiffies(1000));
 		dev_dbg(chip->dev, "get charger type failed, rerun apsd\n");
@@ -545,7 +593,7 @@ static void smb_status_change_work(struct work_struct *work)
 		current_ua = CDP_CURRENT_UA;
 		break;
 	case POWER_SUPPLY_USB_TYPE_DCP:
-		current_ua = chip->batt_info->constant_charge_current_max_ua;
+		current_ua = DCP_CURRENT_UA;
 		break;
 	case POWER_SUPPLY_USB_TYPE_SDP:
 	default:
@@ -553,7 +601,14 @@ static void smb_status_change_work(struct work_struct *work)
 		break;
 	}
 
-	smb_set_current_limit(chip, current_ua);
+	rc = smb_set_current_limit(chip, current_ua);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't set USB input current limit: %d\n", rc);
+		return;
+	}
+
+	dev_dbg(chip->dev, "USB type %d: requested ICL %d uA\n",
+		charger_type, current_ua);
 	power_supply_changed(chip->chg_psy);
 }
 
@@ -661,7 +716,6 @@ static int smb_get_property(struct power_supply *psy,
 			     union power_supply_propval *val)
 {
 	struct smb_chip *chip = power_supply_get_drvdata(psy);
-	int ret;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_MANUFACTURER:
@@ -675,13 +729,8 @@ static int smb_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		return smb_get_current_now(chip, &val->intval);
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		ret = smb_get_iio_chan(chip, chip->usb_in_v_chan,
-					 &val->intval);
-		if (!ret) {
-			if (chip->gen == SMB5)
-				val->intval *= 16;
-		}
-		return ret;
+		return smb_get_iio_chan(chip, chip->usb_in_v_chan,
+					&val->intval);
 	case POWER_SUPPLY_PROP_ONLINE:
 		return smb_get_prop_usb_online(chip, &val->intval);
 	case POWER_SUPPLY_PROP_STATUS:
@@ -742,6 +791,14 @@ static irqreturn_t smb_handle_batt_overvoltage(int irq, void *data)
 static irqreturn_t smb_handle_usb_plugin(int irq, void *data)
 {
 	struct smb_chip *chip = data;
+	int rc;
+
+	cancel_delayed_work_sync(&chip->status_change_work);
+
+	/* Do not carry a DCP limit over to the next cable. */
+	rc = smb_set_current_limit(chip, SDP_CURRENT_UA);
+	if (rc < 0)
+		dev_err(chip->dev, "Couldn't reset USB input current limit: %d\n", rc);
 
 	power_supply_changed(chip->chg_psy);
 
@@ -791,6 +848,8 @@ static const struct power_supply_desc smb_psy_desc = {
 
 /* Init sequence derived from vendor downstream driver */
 static const struct smb_init_register smb5_init_seq[] = {
+	{ .addr = USBIN_CURRENT_LIMIT_CFG, .mask = 0xff,
+	  .val = SDP_CURRENT_UA / 50000 },
 	{ .addr = USBIN_CMD_IL, .mask = USBIN_SUSPEND_BIT, .val = 0 },
 	/*
 	 * By default configure us as an upstream facing port
@@ -831,11 +890,12 @@ static const struct smb_init_register smb5_init_seq[] = {
 	{ .addr = CHARGING_ENABLE_CMD,
 	  .mask = CHARGING_ENABLE_CMD_BIT,
 	  .val = CHARGING_ENABLE_CMD_BIT },
-	/* Enable BC1P2 auto Src detect */
+	/* Enable BC1.2 detection without high-voltage negotiation. */
 	{ .addr = USBIN_OPTIONS_1_CFG,
-	  .mask = AUTO_SRC_DETECT_BIT,
+	  .mask = AUTO_SRC_DETECT_BIT | HVDCP_EN_BIT |
+		  HVDCP_AUTH_ALG_EN_CFG_BIT | HVDCP_AUTONOMOUS_MODE_EN_CFG_BIT,
 	  .val = AUTO_SRC_DETECT_BIT },
-	/* Set the default SDP charger type to a 500ma USB 2.0 port */
+	/* Use the programmed ICL in high-current mode, retaining AICL. */
 	{ .addr = USBIN_ICL_OPTIONS,
 	  .mask = USBIN_MODE_CHG_BIT,
 	  .val = USBIN_MODE_CHG_BIT },
@@ -844,7 +904,7 @@ static const struct smb_init_register smb5_init_seq[] = {
 	  .val = 0 },
 	{ .addr = USBIN_LOAD_CFG,
 	  .mask = ICL_OVERRIDE_AFTER_APSD_BIT,
-	  .val = 0 },
+	  .val = ICL_OVERRIDE_AFTER_APSD_BIT },
 	/* Disable watchdog */
 	{ .addr = SNARL_BARK_BITE_WD_CFG, .mask = 0xff, .val = 0 },
 	{ .addr = WD_CFG,
@@ -1043,7 +1103,8 @@ static int smb_probe(struct platform_device *pdev)
 	struct power_supply_desc *desc;
 	struct smb_chip *chip;
 	const struct smb_match_data *match_data;
-	int rc, irq;
+	int rc, irq, fv_uv, fv_min_uv, fv_max_uv, fv_step_uv;
+	int fcc_ua = 1950000;
 
 	chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
@@ -1081,10 +1142,6 @@ static int smb_probe(struct platform_device *pdev)
 
 	dev_info(chip->dev, "Generation %s\n", chip->gen == SMB2 ? "SMB2" : "SMB5");
 
-	rc = smb_init_hw(chip, match_data->init_seq, match_data->init_seq_len);
-	if (rc < 0)
-		return rc;
-
 	supply_config.drv_data = chip;
 	supply_config.fwnode = dev_fwnode(&pdev->dev);
 
@@ -1108,8 +1165,6 @@ static int smb_probe(struct platform_device *pdev)
 	if (rc)
 		return dev_err_probe(chip->dev, rc,
 				     "Failed to get battery info\n");
-	if (chip->batt_info->constant_charge_current_max_ua == -EINVAL)
-		chip->batt_info->constant_charge_current_max_ua = DCP_CURRENT_UA;
 
 	rc = devm_delayed_work_autocancel(chip->dev, &chip->status_change_work,
 					  smb_status_change_work);
@@ -1117,11 +1172,48 @@ static int smb_probe(struct platform_device *pdev)
 		return dev_err_probe(chip->dev, rc,
 				     "Failed to init status change work\n");
 
-	rc = (chip->batt_info->voltage_max_design_uv - 3487500) / 7500 + 1;
+	fv_uv = chip->batt_info->constant_charge_voltage_max_uv;
+	if (fv_uv == -EINVAL)
+		fv_uv = chip->batt_info->voltage_max_design_uv;
+
+	if (chip->gen == SMB5) {
+		fv_min_uv = 3600000;
+		fv_max_uv = 4790000;
+		fv_step_uv = 10000;
+	} else {
+		fv_min_uv = 3487500;
+		fv_max_uv = 4920000;
+		fv_step_uv = 7500;
+	}
+
+	if (fv_uv < fv_min_uv || fv_uv > fv_max_uv)
+		return dev_err_probe(chip->dev, -EINVAL,
+				     "Invalid battery float voltage: %d uV\n", fv_uv);
+
+	rc = (fv_uv - fv_min_uv) / fv_step_uv;
 	rc = regmap_update_bits(chip->regmap, chip->base + FLOAT_VOLTAGE_CFG,
 				FLOAT_VOLTAGE_SETTING_MASK, rc);
 	if (rc < 0)
 		return dev_err_probe(chip->dev, rc, "Couldn't set vbat max\n");
+
+	/* Keep battery FCC independent of the USB input current limit. */
+	if (chip->batt_info->constant_charge_current_max_ua != -EINVAL) {
+		if (chip->batt_info->constant_charge_current_max_ua <= 0)
+			return dev_err_probe(chip->dev, -EINVAL,
+					     "Invalid battery charge current\n");
+		fcc_ua = min(fcc_ua, chip->batt_info->constant_charge_current_max_ua);
+	}
+
+	rc = regmap_write(chip->regmap, chip->base + FAST_CHARGE_CURRENT_CFG,
+			  fcc_ua / chip->current_step_size_ua);
+	if (rc < 0)
+		return dev_err_probe(chip->dev, rc,
+				     "Couldn't write fast charge current cfg");
+
+	/* Set battery limits before enabling charging. */
+	rc = smb_init_hw(chip, match_data->init_seq, match_data->init_seq_len);
+	if (rc < 0)
+		return rc;
 
 	rc = smb_init_irq(chip, &irq, "bat-ov", smb_handle_batt_overvoltage);
 	if (rc < 0)
@@ -1147,20 +1239,6 @@ static int smb_probe(struct platform_device *pdev)
 		return dev_err_probe(chip->dev, rc, "Couldn't set wake irq\n");
 
 	platform_set_drvdata(pdev, chip);
-
-	/*
-	 * This overrides all of the other current limits and is expected
-	 * to be used for setting limits based on temperature. We set some
-	 * relatively safe default value while still allowing a comfortably
-	 * fast charging rate. Once temperature monitoring is hooked up we
-	 * would expect this to be changed dynamically based on temperature
-	 * reporting.
-	 */
-	rc = regmap_write(chip->regmap, chip->base + FAST_CHARGE_CURRENT_CFG,
-			  1950000 / chip->current_step_size_ua);
-	if (rc < 0)
-		return dev_err_probe(chip->dev, rc,
-				     "Couldn't write fast charge current cfg");
 
 	rc = regmap_write_bits(chip->regmap, chip->base + AICL_RERUN_TIME_CFG,
 			       AICL_RERUN_TIME_MASK, AIC_RERUN_TIME_3_SECS);
