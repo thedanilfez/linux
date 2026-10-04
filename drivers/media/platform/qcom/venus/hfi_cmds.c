@@ -1366,7 +1366,7 @@ int pkt_session_set_property(struct hfi_session_set_property_pkt *pkt,
 	if (hfi_ver == HFI_VERSION_3XX)
 		return pkt_session_set_property_3xx(pkt, cookie, ptype, pdata);
 
-	if (hfi_ver == HFI_VERSION_4XX)
+	if (hfi_ver == HFI_VERSION_4XX || hfi_ver == HFI_VERSION_5XX)
 		return pkt_session_set_property_4xx(pkt, cookie, ptype, pdata);
 
 	return pkt_session_set_property_6xx(pkt, cookie, ptype, pdata);

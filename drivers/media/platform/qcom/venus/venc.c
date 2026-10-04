@@ -901,7 +901,7 @@ static int venc_set_properties(struct venus_inst *inst)
 	if (ret)
 		return ret;
 
-	if (inst->core->res->hfi_version == HFI_VERSION_4XX ||
+	if (IS_V4(inst->core) ||
 	    inst->core->res->hfi_version == HFI_VERSION_6XX) {
 		ptype = HFI_PROPERTY_PARAM_VENC_SESSION_QP_RANGE_V2;
 

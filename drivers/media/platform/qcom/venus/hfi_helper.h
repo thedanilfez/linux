@@ -397,19 +397,25 @@
 #define HFI_BUFFER_INTERNAL_PERSIST_1		0x5
 #define HFI_BUFFER_INTERNAL_SCRATCH(ver)	\
 	(((ver) == HFI_VERSION_4XX ||		\
+	(ver) == HFI_VERSION_5XX ||		\
 	(ver) == HFI_VERSION_6XX) ? 0x6 : 0x1000001)
 #define HFI_BUFFER_INTERNAL_SCRATCH_1(ver)	\
 	(((ver) == HFI_VERSION_4XX ||		\
+	(ver) == HFI_VERSION_5XX ||		\
 	(ver) == HFI_VERSION_6XX) ? 0x7 : 0x1000005)
 #define HFI_BUFFER_INTERNAL_SCRATCH_2(ver)	\
 	(((ver) == HFI_VERSION_4XX ||		\
+	(ver) == HFI_VERSION_5XX ||		\
 	(ver) == HFI_VERSION_6XX) ? 0x8 : 0x1000006)
 #define HFI_BUFFER_EXTRADATA_INPUT(ver)		\
-	(((ver) == HFI_VERSION_4XX) ? 0xc : 0x1000002)
+	(((ver) == HFI_VERSION_4XX ||		\
+	(ver) == HFI_VERSION_5XX) ? 0xc : 0x1000002)
 #define HFI_BUFFER_EXTRADATA_OUTPUT(ver)	\
-	(((ver) == HFI_VERSION_4XX) ? 0xa : 0x1000003)
+	(((ver) == HFI_VERSION_4XX ||		\
+	(ver) == HFI_VERSION_5XX) ? 0xa : 0x1000003)
 #define HFI_BUFFER_EXTRADATA_OUTPUT2(ver)	\
-	(((ver) == HFI_VERSION_4XX) ? 0xb : 0x1000004)
+	(((ver) == HFI_VERSION_4XX ||		\
+	(ver) == HFI_VERSION_5XX) ? 0xb : 0x1000004)
 #define HFI_BUFFER_TYPE_MAX			11
 
 #define HFI_BUFFER_MODE_STATIC			0x1000001
@@ -561,6 +567,7 @@ enum hfi_version {
 	HFI_VERSION_3XX,
 	HFI_VERSION_4XX,
 	HFI_VERSION_6XX,
+	HFI_VERSION_5XX,
 };
 
 struct hfi_buffer_info {
@@ -1181,11 +1188,11 @@ struct hfi_buffer_requirements {
 	u32 alignment;
 };
 
-/* On HFI 4XX, some of the struct members have been swapped. */
+/* On HFI 4XX and 5XX, some of the struct members have been swapped. */
 static inline u32 hfi_bufreq_get_hold_count(struct hfi_buffer_requirements *req,
 					    u32 ver)
 {
-	if (ver == HFI_VERSION_4XX)
+	if (ver == HFI_VERSION_4XX || ver == HFI_VERSION_5XX)
 		return 0;
 
 	return req->hold_count;
@@ -1194,7 +1201,7 @@ static inline u32 hfi_bufreq_get_hold_count(struct hfi_buffer_requirements *req,
 static inline u32 hfi_bufreq_get_count_min(struct hfi_buffer_requirements *req,
 					   u32 ver)
 {
-	if (ver == HFI_VERSION_4XX)
+	if (ver == HFI_VERSION_4XX || ver == HFI_VERSION_5XX)
 		return req->hold_count;
 
 	return req->count_min;
@@ -1203,7 +1210,7 @@ static inline u32 hfi_bufreq_get_count_min(struct hfi_buffer_requirements *req,
 static inline u32 hfi_bufreq_get_count_min_host(struct hfi_buffer_requirements *req,
 						u32 ver)
 {
-	if (ver == HFI_VERSION_4XX)
+	if (ver == HFI_VERSION_4XX || ver == HFI_VERSION_5XX)
 		return req->count_min;
 
 	return 0;
@@ -1212,7 +1219,7 @@ static inline u32 hfi_bufreq_get_count_min_host(struct hfi_buffer_requirements *
 static inline void hfi_bufreq_set_hold_count(struct hfi_buffer_requirements *req,
 					     u32 ver, u32 val)
 {
-	if (ver == HFI_VERSION_4XX)
+	if (ver == HFI_VERSION_4XX || ver == HFI_VERSION_5XX)
 		return;
 
 	req->hold_count = val;
@@ -1221,7 +1228,7 @@ static inline void hfi_bufreq_set_hold_count(struct hfi_buffer_requirements *req
 static inline void hfi_bufreq_set_count_min(struct hfi_buffer_requirements *req,
 					    u32 ver, u32 val)
 {
-	if (ver == HFI_VERSION_4XX)
+	if (ver == HFI_VERSION_4XX || ver == HFI_VERSION_5XX)
 		req->hold_count = val;
 
 	req->count_min = val;
@@ -1230,7 +1237,7 @@ static inline void hfi_bufreq_set_count_min(struct hfi_buffer_requirements *req,
 static inline void hfi_bufreq_set_count_min_host(struct hfi_buffer_requirements *req,
 						 u32 ver, u32 val)
 {
-	if (ver == HFI_VERSION_4XX)
+	if (ver == HFI_VERSION_4XX || ver == HFI_VERSION_5XX)
 		req->count_min = val;
 };
 

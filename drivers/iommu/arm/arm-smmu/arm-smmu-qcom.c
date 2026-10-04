@@ -6,6 +6,7 @@
 #include <linux/acpi.h>
 #include <linux/adreno-smmu-priv.h>
 #include <linux/delay.h>
+#include <dt-bindings/firmware/qcom,scm.h>
 #include <linux/of_device.h>
 #include <linux/firmware/qcom/qcom_scm.h>
 #include <linux/platform_device.h>
@@ -60,6 +61,10 @@ static const struct of_device_id qcom_smmu_actlr_client_of_match[] = {
 	{ .compatible = "qcom,sm6125-mdss",
 			.data = (const void *) (PREFETCH_SHALLOW | CPRE | CMTLB) },
 	{ .compatible = "qcom,sm6350-mdss",
+			.data = (const void *) (PREFETCH_SHALLOW | CPRE | CMTLB) },
+	{ .compatible = "qcom,sm7150-venus",
+			.data = (const void *) (PREFETCH_SHALLOW | CPRE | CMTLB) },
+	{ .compatible = "qcom,sm7150-venus-secure-nonpixel",
 			.data = (const void *) (PREFETCH_SHALLOW | CPRE | CMTLB) },
 	{ .compatible = "qcom,sm7150-mdss",
 			.data = (const void *) (PREFETCH_SHALLOW | CPRE | CMTLB) },
@@ -406,6 +411,7 @@ static int qcom_adreno_smmu_init_context(struct arm_smmu_domain *smmu_domain,
 }
 
 static const struct of_device_id qcom_smmu_client_of_match[] __maybe_unused = {
+	{ .compatible = "qcom,sm7150-venus-secure-nonpixel" },
 	{ .compatible = "qcom,adreno" },
 	{ .compatible = "qcom,adreno-gmu" },
 	{ .compatible = "qcom,glymur-mdss" },
@@ -431,6 +437,60 @@ static const struct of_device_id qcom_smmu_client_of_match[] __maybe_unused = {
 	{ }
 };
 
+static void *qcom_smmu_secure_alloc(void *cookie, size_t size, gfp_t gfp)
+{
+	struct arm_smmu_domain *domain = cookie;
+	const struct qcom_scm_vmperm perms[] = {
+		{ QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RW },
+		{ QCOM_SCM_VMID_CP_NON_PIXEL, QCOM_SCM_PERM_READ },
+	};
+	u64 owners = BIT_ULL(QCOM_SCM_VMID_HLOS);
+	void *pages;
+	int ret;
+
+	if (!gfpflags_allow_blocking(gfp))
+		return NULL;
+
+	size = PAGE_ALIGN(size);
+	pages = alloc_pages_exact(size, gfp | __GFP_ZERO);
+	if (!pages)
+		return NULL;
+
+	ret = qcom_scm_assign_mem(virt_to_phys(pages), size, &owners,
+				  perms, ARRAY_SIZE(perms));
+	if (ret) {
+		/* An unsuccessful assignment may leave ownership uncertain. */
+		dev_err(domain->smmu->dev,
+			"secure page-table assignment failed: %d; retaining pages\n",
+			ret);
+		return NULL;
+	}
+
+	return pages;
+}
+
+static void qcom_smmu_secure_free(void *cookie, void *pages, size_t size)
+{
+	struct arm_smmu_domain *domain = cookie;
+	const struct qcom_scm_vmperm perm = {
+		QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RWX,
+	};
+	u64 owners = BIT_ULL(QCOM_SCM_VMID_HLOS) |
+		     BIT_ULL(QCOM_SCM_VMID_CP_NON_PIXEL);
+	int ret;
+
+	size = PAGE_ALIGN(size);
+	ret = qcom_scm_assign_mem(virt_to_phys(pages), size, &owners, &perm, 1);
+	if (ret) {
+		dev_err(domain->smmu->dev,
+			"secure page-table reclaim failed: %d; retaining pages\n",
+			ret);
+		return;
+	}
+
+	free_pages_exact(pages, size);
+}
+
 static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
 		struct io_pgtable_cfg *pgtbl_cfg, struct device *dev)
 {
@@ -438,6 +498,19 @@ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
 	struct qcom_smmu *qsmmu = to_qcom_smmu(smmu);
 	const struct of_device_id *client_match;
 	int cbndx = smmu_domain->cfg.cbndx;
+
+	if (of_device_is_compatible(dev->of_node,
+				   "qcom,sm7150-venus-secure-nonpixel")) {
+		if (!of_device_is_compatible(smmu->dev->of_node,
+					     "qcom,sm7150-smmu-500") ||
+		    smmu_domain->stage != ARM_SMMU_DOMAIN_S1)
+			return -EOPNOTSUPP;
+		if (!qcom_scm_is_available())
+			return -EPROBE_DEFER;
+
+		pgtbl_cfg->alloc = qcom_smmu_secure_alloc;
+		pgtbl_cfg->free = qcom_smmu_secure_free;
+	}
 
 	smmu_domain->cfg.flush_walk_prefer_tlbiasid = true;
 

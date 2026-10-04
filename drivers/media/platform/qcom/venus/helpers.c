@@ -13,6 +13,7 @@
 #include <asm/div64.h>
 
 #include "core.h"
+#include "secure.h"
 #include "helpers.h"
 #include "hfi_helper.h"
 #include "pm_helpers.h"
@@ -36,6 +37,7 @@ struct intbuf {
 	unsigned long attrs;
 	enum dpb_buf_owner owned_by;
 	u32 dpb_out_tag;
+	struct venus_secure_buffer *secure;
 };
 
 bool venus_helper_check_codec(struct venus_inst *inst, u32 v4l2_pixfmt)
@@ -258,13 +260,25 @@ static int intbufs_set_buffer(struct venus_inst *inst, u32 type)
 		buf->size = bufreq.size;
 		buf->attrs = DMA_ATTR_WRITE_COMBINE |
 			     DMA_ATTR_NO_KERNEL_MAPPING;
-		buf->va = dma_alloc_attrs(dev, buf->size, &buf->da, GFP_KERNEL,
-					  buf->attrs);
-		if (!buf->va) {
-			ret = -ENOMEM;
-			goto fail;
+		if (IS_V5(core) && inst->session_type == VIDC_SESSION_TYPE_ENC &&
+		    type == HFI_BUFFER_INTERNAL_PERSIST) {
+			buf->secure = venus_secure_alloc(core, buf->size,
+						  bufreq.alignment, &buf->da);
+			if (IS_ERR(buf->secure)) {
+				ret = PTR_ERR(buf->secure);
+				goto fail;
+			}
+		} else {
+			buf->va = dma_alloc_attrs(dev, buf->size, &buf->da,
+						 GFP_KERNEL, buf->attrs);
+			if (!buf->va) {
+				ret = -ENOMEM;
+				goto fail;
+			}
 		}
 
+		dev_dbg(dev, "internal buffer type %u iova %pad size %#zx\n",
+			buf->type, &buf->da, buf->size);
 		memset(&bd, 0, sizeof(bd));
 		bd.buffer_size = buf->size;
 		bd.buffer_type = buf->type;
@@ -283,7 +297,10 @@ static int intbufs_set_buffer(struct venus_inst *inst, u32 type)
 	return 0;
 
 dma_free:
-	dma_free_attrs(dev, buf->size, buf->va, buf->da, buf->attrs);
+	if (buf->secure)
+		venus_secure_free(core, buf->secure, false);
+	else
+		dma_free_attrs(dev, buf->size, buf->va, buf->da, buf->attrs);
 fail:
 	kfree(buf);
 	return ret;
@@ -293,7 +310,7 @@ static int intbufs_unset_buffers(struct venus_inst *inst)
 {
 	struct hfi_buffer_desc bd = {0};
 	struct intbuf *buf, *n;
-	int ret = 0;
+	int ret = 0, err;
 
 	list_for_each_entry_safe(buf, n, &inst->internalbufs, list) {
 		bd.buffer_size = buf->size;
@@ -302,11 +319,21 @@ static int intbufs_unset_buffers(struct venus_inst *inst)
 		bd.device_addr = buf->da;
 		bd.response_required = true;
 
-		ret = hfi_session_unset_buffers(inst, &bd);
+		err = hfi_session_unset_buffers(inst, &bd);
+		if (err && !ret)
+			ret = err;
 
 		list_del_init(&buf->list);
-		dma_free_attrs(inst->core->dev, buf->size, buf->va, buf->da,
-			       buf->attrs);
+		if (buf->secure) {
+			err = venus_secure_free(inst->core, buf->secure,
+						!err && !inst->session_error &&
+						!test_bit(0, &inst->core->sys_error));
+			if (err && !ret)
+				ret = err;
+		} else {
+			dma_free_attrs(inst->core->dev, buf->size, buf->va,
+				       buf->da, buf->attrs);
+		}
 		kfree(buf);
 	}
 
@@ -1449,6 +1476,8 @@ int venus_helper_vb2_buf_init(struct vb2_buffer *vb)
 
 	buf->size = vb2_plane_size(vb, 0);
 	buf->dma_addr = vb2_dma_contig_plane_dma_addr(vb, 0);
+	dev_dbg(inst->core->dev, "buffer type %u index %u iova %pad size %#x\n",
+		vb->type, vb->index, &buf->dma_addr, buf->size);
 
 	if (vb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
 		list_add_tail(&buf->reg_list, &inst->registeredbufs);
