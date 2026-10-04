@@ -11,7 +11,8 @@ maintainers:
 
 description: |
   The QG peripheral samples battery voltage and signed current into a FIFO.
-  Its SDAM peripheral retains the estimated battery state across reboots.
+  Its SDAM peripheral retains the estimated battery state, learned full
+  charge capacity and charge cycle counters across reboots.
   The monitored battery supplies the open circuit voltage profile and design
   capacity required to initialize the charge estimate.
 

@@ -226,15 +226,17 @@ config BATTERY_QCOM_QG
 	help
 	  Say Y here to enable the PM6150 QG battery gauge. It integrates
 	  hardware FIFO current samples and uses a battery OCV profile for
-	  initialization and recalibration.
+	  initialization and recalibration. Cycle counts and learned full
+	  charge capacity are retained in the QG SDAM peripheral.
 
 config BATTERY_QCOM_QG_KUNIT_TEST
 	tristate "KUnit tests for Qualcomm QG charge calculations"
 	depends on KUNIT
 	default KUNIT_ALL_TESTS
 	help
-	  Test QG charge unit conversions and usable capacity normalization,
-	  including batteries whose nAh full capacity exceeds 32 bits.
+	  Test QG charge unit conversions, usable capacity normalization,
+	  cycle counting and capacity learning, including batteries whose
+	  nAh full capacity exceeds 32 bits.
 
 config BATTERY_OLPC
 	tristate "One Laptop Per Child battery"
