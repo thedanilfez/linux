@@ -768,6 +768,10 @@
 			no-map;
 		};
 
+		venus_iova: venus-iova {
+			iommu-addresses = <&venus 0x0 0x0 0x0 0x25800000>;
+		};
+
 		venus_mem: venus@93400000 {
 			reg = <0x0 0x93400000 0x0 0x500000>;
 			no-map;
@@ -3578,8 +3582,8 @@
 				      "bus",
 				      "vcodec0_core",
 				      "vcodec0_bus",
-				      "vcodec1_core",
-				      "vcodec1_bus";
+				      "cvp_core",
+				      "cvp_bus";
 
 			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ALWAYS
 					 &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ALWAYS>,
@@ -3594,16 +3598,21 @@
 					<&rpmhpd RPMHPD_CX>;
 			power-domain-names = "venus",
 					     "vcodec0",
-					     "vcodec1",
+					     "cvp",
 					     "cx";
 
 			operating-points-v2 = <&venus_opp_table>;
 
-			memory-region = <&venus_mem>;
+			memory-region = <&venus_mem>, <&venus_iova>;
 
 			iommus = <&apps_smmu 0x1080 0x60>;
 
 			status = "disabled";
+
+			secure-nonpixel {
+				compatible = "qcom,sm7150-venus-secure-nonpixel";
+				iommus = <&apps_smmu 0x1084 0x60>;
+			};
 
 			video-decoder {
 				compatible = "venus-decoder";
@@ -3629,16 +3638,6 @@
 				opp-365000000 {
 					opp-hz = /bits/ 64 <365000000>;
 					required-opps = <&rpmhpd_opp_svs_l1>;
-				};
-
-				opp-444000000 {
-					opp-hz = /bits/ 64 <444000000>;
-					required-opps = <&rpmhpd_opp_nom>;
-				};
-
-				opp-533000000 {
-					opp-hz = /bits/ 64 <533000000>;
-					required-opps = <&rpmhpd_opp_turbo>;
 				};
 			};
 		};
