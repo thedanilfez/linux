@@ -904,10 +904,18 @@ static int coreid_power_v4(struct venus_inst *inst, int on)
 		if (ret)
 			return ret;
 
+		if (IS_IRIS1(core))
+			return 0;
+
 		mutex_lock(&core->lock);
 		ret = acquire_core(inst);
 		mutex_unlock(&core->lock);
 	} else {
+		if (IS_IRIS1(core)) {
+			inst->clk_data.core_id = VIDC_CORE_ID_DEFAULT;
+			return 0;
+		}
+
 		mutex_lock(&core->lock);
 		ret = release_core(inst);
 		mutex_unlock(&core->lock);
@@ -1157,6 +1165,57 @@ static void core_put_v4(struct venus_core *core)
 {
 }
 
+/* Keep both MVS domains on while firmware power control is disabled. */
+static int iris1_power_on(struct venus_core *core)
+{
+	struct device **pds = core->pmdomains->pd_devs;
+	const struct venus_resources *res = core->res;
+	int ret;
+
+	ret = dev_pm_opp_set_rate(core->dev,
+				  res->freq_tbl[res->freq_tbl_size - 1].freq);
+	if (ret)
+		return ret;
+
+	ret = pm_runtime_resume_and_get(pds[1]);
+	if (ret < 0)
+		goto err_rate;
+
+	ret = pm_runtime_resume_and_get(pds[2]);
+	if (ret < 0)
+		goto err_put_vcodec;
+
+	ret = vcodec_clks_enable(core, core->vcodec0_clks);
+	if (ret)
+		goto err_put_cvp;
+
+	ret = vcodec_clks_enable(core, core->vcodec1_clks);
+	if (ret)
+		goto err_disable_vcodec;
+
+	return 0;
+
+err_disable_vcodec:
+	vcodec_clks_disable(core, core->vcodec0_clks);
+err_put_cvp:
+	pm_runtime_put_sync(pds[2]);
+err_put_vcodec:
+	pm_runtime_put_sync(pds[1]);
+err_rate:
+	dev_pm_opp_set_rate(core->dev, 0);
+	return ret;
+}
+
+static void iris1_power_off(struct venus_core *core)
+{
+	struct device **pds = core->pmdomains->pd_devs;
+
+	vcodec_clks_disable(core, core->vcodec1_clks);
+	vcodec_clks_disable(core, core->vcodec0_clks);
+	pm_runtime_put_sync(pds[2]);
+	pm_runtime_put_sync(pds[1]);
+}
+
 static int core_power_v4(struct venus_core *core, int on)
 {
 	struct device *dev = core->dev;
@@ -1182,7 +1241,18 @@ static int core_power_v4(struct venus_core *core, int on)
 		ret = core_clks_enable(core);
 		if (ret < 0 && pmctrl)
 			pm_runtime_put_sync(pmctrl);
+
+		if (!ret && IS_IRIS1(core)) {
+			ret = iris1_power_on(core);
+			if (ret) {
+				core_clks_disable(core);
+				pm_runtime_put_sync(pmctrl);
+			}
+		}
 	} else {
+		if (IS_IRIS1(core))
+			iris1_power_off(core);
+
 		/* Drop the performance state vote */
 		if (core->opp_pmdomain)
 			dev_pm_opp_set_rate(dev, 0);
@@ -1325,6 +1395,7 @@ const struct venus_pm_ops *venus_pm_get(enum hfi_version version)
 	case HFI_VERSION_3XX:
 		return &pm_ops_v3;
 	case HFI_VERSION_4XX:
+	case HFI_VERSION_5XX:
 	case HFI_VERSION_6XX:
 		return &pm_ops_v4;
 	}

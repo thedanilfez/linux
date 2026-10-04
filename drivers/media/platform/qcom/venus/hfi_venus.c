@@ -72,6 +72,9 @@ struct hfi_queue_header {
 	u32 write_idx;
 };
 
+static_assert(sizeof(struct hfi_queue_table_header) == 24);
+static_assert(sizeof(struct hfi_queue_header) == 56);
+
 #define IFACEQ_TABLE_SIZE	\
 	(sizeof(struct hfi_queue_table_header) +	\
 	 sizeof(struct hfi_queue_header) * IFACEQ_NUM)
@@ -546,6 +549,12 @@ static int venus_run(struct venus_hfi_device *hdev)
 	writel(SHARED_QSIZE, cpu_cs_base + UC_REGION_SIZE);
 	writel(hdev->ifaceq_table.da, cpu_cs_base + CPU_CS_SCIACMDARG2);
 	writel(0x01, cpu_cs_base + CPU_CS_SCIACMDARG1);
+	if (IS_V5(hdev->core)) {
+		/* Downstream initializes these even without DSP sessions. */
+		writel(hdev->ifaceq_table.da, cpu_cs_base + DSP_QTBL_ADDR);
+		writel(hdev->ifaceq_table.da, cpu_cs_base + DSP_UC_REGION_ADDR);
+		writel(SHARED_QSIZE, cpu_cs_base + DSP_UC_REGION_SIZE);
+	}
 	if (hdev->sfr.da)
 		writel(hdev->sfr.da, cpu_cs_base + SFR_ADDR);
 
@@ -780,7 +789,8 @@ static void venus_interface_queues_release(struct venus_hfi_device *hdev)
 	mutex_lock(&hdev->lock);
 
 	venus_free(hdev, &hdev->ifaceq_table);
-	venus_free(hdev, &hdev->sfr);
+	if (!IS_V5(hdev->core))
+		venus_free(hdev, &hdev->sfr);
 
 	memset(hdev->queues, 0, sizeof(hdev->queues));
 	memset(&hdev->ifaceq_table, 0, sizeof(hdev->ifaceq_table));
@@ -799,9 +809,19 @@ static int venus_interface_queues_init(struct venus_hfi_device *hdev)
 	unsigned int i;
 	int ret;
 
-	ret = venus_alloc(hdev, &desc, ALIGNED_QUEUE_SIZE);
+	ret = venus_alloc(hdev, &desc, IS_V5(hdev->core) ?
+			  SHARED_QSIZE : ALIGNED_QUEUE_SIZE);
 	if (ret)
 		return ret;
+
+	if (IS_V5(hdev->core) &&
+	    (!IS_ALIGNED(desc.da, SZ_1M) ||
+	     desc.da < hdev->core->res->cp_size ||
+	     desc.da + desc.size - 1 > hdev->core->res->dma_mask)) {
+		dev_err(hdev->core->dev, "invalid HFI shared region %pad\n", &desc.da);
+		venus_free(hdev, &desc);
+		return -EINVAL;
+	}
 
 	hdev->ifaceq_table = desc;
 	offset = IFACEQ_TABLE_SIZE;
@@ -842,11 +862,20 @@ static int venus_interface_queues_init(struct venus_hfi_device *hdev)
 	queue = &hdev->queues[IFACEQ_DBG_IDX];
 	queue->qhdr->rx_req = 0;
 
-	ret = venus_alloc(hdev, &desc, ALIGNED_SFR_SIZE);
-	if (ret) {
-		hdev->sfr.da = 0;
+	if (IS_V5(hdev->core)) {
+		/* Keep SFR inside the firmware's uncached region. */
+		hdev->sfr.da = desc.da + ALIGNED_QUEUE_SIZE;
+		hdev->sfr.kva = desc.kva + ALIGNED_QUEUE_SIZE;
+		hdev->sfr.size = ALIGNED_SFR_SIZE;
 	} else {
-		hdev->sfr = desc;
+		ret = venus_alloc(hdev, &desc, ALIGNED_SFR_SIZE);
+		if (ret)
+			hdev->sfr.da = 0;
+		else
+			hdev->sfr = desc;
+	}
+
+	if (hdev->sfr.kva) {
 		sfr = hdev->sfr.kva;
 		sfr->buf_size = ALIGNED_SFR_SIZE;
 	}
@@ -960,10 +989,13 @@ static int venus_sys_set_default_properties(struct venus_hfi_device *hdev)
 			dev_warn(dev, "setting idle response ON failed (%d)\n", ret);
 	}
 
-	ret = venus_sys_set_power_control(hdev, venus_fw_low_power_mode);
-	if (ret)
-		dev_warn(dev, "setting hw power collapse ON failed (%d)\n",
-			 ret);
+	/* Keep HFI 5XX codec and CVP power control in software. */
+	if (!IS_V5(hdev->core)) {
+		ret = venus_sys_set_power_control(hdev, venus_fw_low_power_mode);
+		if (ret)
+			dev_warn(dev, "setting hw power collapse ON failed (%d)\n",
+				 ret);
+	}
 
 	/* For specific venus core, it is mandatory to set the UBWC configuration */
 	if (res->ubwc_conf) {
@@ -1051,27 +1083,36 @@ static void venus_sfr_print(struct venus_hfi_device *hdev)
 	struct device *dev = hdev->core->dev;
 	struct hfi_sfr *sfr = hdev->sfr.kva;
 	u32 size;
-	void *p;
 
 	if (!sfr)
 		return;
 
-	size = sfr->buf_size;
-	if (!size)
+	size = min_t(u32, READ_ONCE(sfr->buf_size), hdev->sfr.size);
+	if (size <= sizeof(*sfr))
 		return;
 
-	if (size > ALIGNED_SFR_SIZE)
-		size = ALIGNED_SFR_SIZE;
+	dev_err_ratelimited(dev, "SFR message from FW: %.*s\n",
+			    (int)(size - sizeof(*sfr)), sfr->data);
+}
 
-	p = memchr(sfr->data, '\0', size);
-	/*
-	 * SFR isn't guaranteed to be NULL terminated since SYS_ERROR indicates
-	 * that Venus is in the process of crashing.
-	 */
-	if (!p)
-		sfr->data[size - 1] = '\0';
+void venus_hfi_dump_sfr(struct venus_core *core)
+{
+	struct venus_hfi_device *hdev = to_hfi_priv(core);
+	struct hfi_queue_header *qhdr;
+	unsigned int i;
 
-	dev_err_ratelimited(dev, "SFR message from FW: %s\n", sfr->data);
+	dev_err(core->dev, "HFI region %pad size %#x, SFR %pad\n",
+		&hdev->ifaceq_table.da, hdev->ifaceq_table.size, &hdev->sfr.da);
+	dev_err(core->dev, "last HFI command %#x, powered %u, suspended %u\n",
+		READ_ONCE(hdev->last_packet_type),
+		READ_ONCE(hdev->power_enabled), READ_ONCE(hdev->suspended));
+	for (i = 0; i < IFACEQ_NUM; i++) {
+		qhdr = hdev->queues[i].qhdr;
+		dev_err(core->dev, "HFI queue %u: read %u write %u rx_req %u\n",
+			i, READ_ONCE(qhdr->read_idx), READ_ONCE(qhdr->write_idx),
+			READ_ONCE(qhdr->rx_req));
+	}
+	venus_sfr_print(hdev);
 }
 
 static void venus_process_msg_sys_error(struct venus_hfi_device *hdev,

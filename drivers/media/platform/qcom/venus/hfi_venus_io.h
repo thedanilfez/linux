@@ -54,6 +54,10 @@
 #define CPU_CS_VCICMD				0x20
 #define CPU_CS_VCICMD_ARP_OFF			BIT(0)
 
+#define DSP_QTBL_ADDR				0x34
+#define DSP_UC_REGION_ADDR			0x38
+#define DSP_UC_REGION_SIZE			0x3c
+
 #define SFR_ADDR				0x5c
 #define MMAP_ADDR				0x60
 #define UC_REGION_ADDR				0x64

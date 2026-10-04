@@ -87,9 +87,6 @@ int hfi_core_deinit(struct venus_core *core, bool blocking)
 
 	mutex_lock(&core->lock);
 
-	if (core->state == CORE_UNINIT)
-		goto unlock;
-
 	empty = list_empty(&core->instances);
 
 	if (!empty && !blocking) {
@@ -103,6 +100,9 @@ int hfi_core_deinit(struct venus_core *core, bool blocking)
 			       !atomic_read(&core->insts_count));
 		mutex_lock(&core->lock);
 	}
+
+	if (core->state == CORE_UNINIT)
+		goto unlock;
 
 	if (!core->ops)
 		goto unlock;
@@ -143,8 +143,13 @@ static int wait_session_msg(struct venus_inst *inst)
 	int ret;
 
 	ret = wait_for_completion_timeout(&inst->done, TIMEOUT);
-	if (!ret)
+	if (!ret) {
+		dev_err(inst->core->dev,
+			"HFI session timeout: type %u codec %#x state %u\n",
+			inst->session_type, inst->hfi_codec, inst->state);
+		venus_hfi_dump_sfr(inst->core);
 		return -ETIMEDOUT;
+	}
 
 	if (inst->error != HFI_ERR_NONE)
 		return -EIO;

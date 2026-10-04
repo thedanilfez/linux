@@ -190,6 +190,8 @@ struct venus_format {
  * @ocs:	OF changeset pointer
  * @hwmode_dev:	a flag indicating that HW_CTRL_TRIGGER is used in clock driver
  */
+struct venus_secure;
+
 struct venus_core {
 	void __iomem *base;
 	void __iomem *vbif_base;
@@ -214,6 +216,7 @@ struct venus_core {
 	struct v4l2_device v4l2_dev;
 	const struct venus_resources *res;
 	struct device *dev;
+	struct venus_secure *secure;
 	struct device *dev_dec;
 	struct device *dev_enc;
 	unsigned int use_tz;
@@ -532,7 +535,10 @@ struct venus_inst {
 
 #define IS_V1(core)	((core)->res->hfi_version == HFI_VERSION_1XX)
 #define IS_V3(core)	((core)->res->hfi_version == HFI_VERSION_3XX)
-#define IS_V4(core)	((core)->res->hfi_version == HFI_VERSION_4XX)
+/* HFI 5XX uses the 4XX packet and register layouts. */
+#define IS_V4(core)	((core)->res->hfi_version == HFI_VERSION_4XX || \
+			 (core)->res->hfi_version == HFI_VERSION_5XX)
+#define IS_V5(core)	((core)->res->hfi_version == HFI_VERSION_5XX)
 #if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))
 #define IS_V6(core)	((core)->res->hfi_version == HFI_VERSION_6XX)
 #else

@@ -26,6 +26,7 @@
 
 #include "core.h"
 #include "firmware.h"
+#include "secure.h"
 #include "pm_helpers.h"
 #include "hfi_venus_io.h"
 
@@ -111,7 +112,14 @@ static void venus_sys_error_handler(struct work_struct *work)
 
 	mutex_lock(&core->lock);
 
-	venus_shutdown(core);
+	ret = venus_shutdown(core);
+	if (ret) {
+		mutex_unlock(&core->lock);
+		pm_runtime_put_sync(core->dev);
+		dev_err(core->dev, "Venus shutdown failed: %d\n", ret);
+		return;
+	}
+	venus_secure_reclaim(core);
 
 	if (test_bit(0, &core->dump_core)) {
 		venus_coredump(core);
@@ -381,7 +389,7 @@ static int venus_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct venus_core *core;
-	int ret;
+	int ret, shutdown_ret;
 
 	core = devm_kzalloc(dev, sizeof(*core), GFP_KERNEL);
 	if (!core)
@@ -486,9 +494,13 @@ static int venus_probe(struct platform_device *pdev)
 			goto err_core_deinit;
 	}
 
-	ret = of_platform_populate(dev->of_node, NULL, NULL, dev);
+	ret = venus_secure_init(core);
 	if (ret)
 		goto err_remove_dynamic_nodes;
+
+	ret = of_platform_populate(dev->of_node, NULL, NULL, dev);
+	if (ret)
+		goto err_of_depopulate;
 
 	ret = venus_enumerate_codecs(core, VIDC_SESSION_TYPE_DEC);
 	if (ret)
@@ -509,7 +521,12 @@ static int venus_probe(struct platform_device *pdev)
 	return 0;
 
 err_of_depopulate:
+	hfi_core_deinit(core, false);
+	shutdown_ret = venus_shutdown(core);
 	of_platform_depopulate(dev);
+	venus_secure_deinit(core, !shutdown_ret);
+	venus_remove_dynamic_nodes(core);
+	goto err_firmware_deinit;
 err_remove_dynamic_nodes:
 	venus_remove_dynamic_nodes(core);
 err_core_deinit:
@@ -545,8 +562,9 @@ static void venus_remove(struct platform_device *pdev)
 	ret = hfi_core_deinit(core, true);
 	WARN_ON(ret);
 
-	venus_shutdown(core);
+	ret = venus_shutdown(core);
 	of_platform_depopulate(dev);
+	venus_secure_deinit(core, !ret);
 
 	venus_firmware_deinit(core);
 
@@ -995,6 +1013,64 @@ static const struct venus_resources sc7180_res = {
 	.enc_nodename = "video-encoder",
 };
 
+static const struct freq_tbl sm7150_freq_table[] = {
+	{ 0, 365000000 },
+	{ 0, 338000000 },
+	{ 0, 240000000 },
+};
+
+static const struct reg_val sm7150_reg_preset[] = {
+	{ 0xe2000, 0 },	/* WRAPPER_CPU_CLOCK_CONFIG */
+	{ 0xe2010, 0 },	/* WRAPPER_CPU_CGC_DIS */
+};
+
+static const struct bw_tbl sm7150_bw_table_enc[] = {
+	{  972000,  750000, 0, 0, 0 },	/* 3840x2160@30 */
+	{  489600,  451000, 0, 0, 0 },	/* 1920x1080@60 */
+	{  244800,  234000, 0, 0, 0 },	/* 1920x1080@30 */
+};
+
+static const struct bw_tbl sm7150_bw_table_dec[] = {
+	{ 1036800, 1386000, 0, 1875000, 0 },	/* 4096x2160@30 */
+	{  489600,  865000, 0, 1146000, 0 },	/* 1920x1080@60 */
+	{  244800,  530000, 0,  583000, 0 },	/* 1920x1080@30 */
+};
+
+static const struct venus_resources sm7150_res = {
+	.freq_tbl = sm7150_freq_table,
+	.freq_tbl_size = ARRAY_SIZE(sm7150_freq_table),
+	.reg_tbl = sm7150_reg_preset,
+	.reg_tbl_size = ARRAY_SIZE(sm7150_reg_preset),
+	.bw_tbl_enc = sm7150_bw_table_enc,
+	.bw_tbl_enc_size = ARRAY_SIZE(sm7150_bw_table_enc),
+	.bw_tbl_dec = sm7150_bw_table_dec,
+	.bw_tbl_dec_size = ARRAY_SIZE(sm7150_bw_table_dec),
+	.clks = { "core", "iface", "bus" },
+	.clks_num = 3,
+	.vcodec0_clks = { "vcodec0_core", "vcodec0_bus" },
+	.vcodec1_clks = { "cvp_core", "cvp_bus" },
+	.vcodec_clks_num = 2,
+	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0", "cvp" },
+	.vcodec_pmdomains_num = 3,
+	.opp_pmdomain = (const char *[]) { "cx" },
+	.opp_pmdomain_num = 1,
+	/* MVS1 is CVP; encoder and decoder share MVS0. */
+	.vcodec_num = 1,
+	.max_load = 3110400,
+	.hfi_version = HFI_VERSION_5XX,
+	.vpu_version = VPU_VERSION_IRIS1,
+	.num_vpp_pipes = 1,
+	.vmem_id = VIDC_RESOURCE_NONE,
+	.dma_mask = 0xe0000000 - 1,
+	.cp_start = 0,
+	.cp_size = 0x25800000,
+	.cp_nonpixel_start = 0x1000000,
+	.cp_nonpixel_size = 0x24800000,
+	.fwname = "qcom/venus-5.4/venus.mbn",
+	.dec_nodename = "video-decoder",
+	.enc_nodename = "video-encoder",
+};
+
 #if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))
 static const struct freq_tbl sm8250_freq_table[] = {
 	{ 0, 444000000 },
@@ -1177,6 +1253,7 @@ static const struct of_device_id venus_dt_match[] = {
 	{ .compatible = "qcom,msm8998-venus", .data = &msm8998_res, },
 	{ .compatible = "qcom,qcm2290-venus", .data = &qcm2290_res, },
 	{ .compatible = "qcom,sc7180-venus", .data = &sc7180_res, },
+	{ .compatible = "qcom,sm7150-venus", .data = &sm7150_res, },
 	{ .compatible = "qcom,sdm660-venus", .data = &sdm660_res, },
 	{ .compatible = "qcom,sdm845-venus", .data = &sdm845_res, },
 	{ .compatible = "qcom,sdm845-venus-v2", .data = &sdm845_res_v2, },
