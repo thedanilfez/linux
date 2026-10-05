@@ -206,10 +206,12 @@ static int q6core_get_svc_versions(struct q6core *core)
 static bool __q6core_is_adsp_ready(struct q6core *core)
 {
 	struct apr_device *adev = core->adev;
-	struct apr_pkt pkt;
+	struct apr_pkt pkt = {};
 	int rc;
 
-	core->get_state_supported = false;
+	core->resp_received = false;
+	core->avcs_state = 0;
+	core->get_state_supported = true;
 
 	pkt.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
 				      APR_HDR_LEN(APR_HDR_SIZE), APR_PKT_VER);
@@ -222,18 +224,16 @@ static bool __q6core_is_adsp_ready(struct q6core *core)
 
 	rc = wait_event_timeout(core->wait, (core->resp_received),
 				msecs_to_jiffies(Q6_READY_TIMEOUT_MS));
-	if (rc > 0 && core->resp_received) {
-		core->resp_received = false;
+	if (!rc)
+		return false;
 
-		if (core->avcs_state)
-			return true;
-	}
+	core->resp_received = false;
 
 	/* assume that the adsp is up if we not support this command */
 	if (!core->get_state_supported)
 		return true;
 
-	return false;
+	return !!core->avcs_state;
 }
 
 /**

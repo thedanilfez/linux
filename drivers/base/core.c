@@ -1687,6 +1687,7 @@ void device_links_unbind_consumers(struct device *dev)
 static void device_links_purge(struct device *dev)
 {
 	struct device_link *link, *ln;
+	int ret;
 
 	if (dev->class == &devlink_class)
 		return;
@@ -1695,6 +1696,7 @@ static void device_links_purge(struct device *dev)
 	 * Delete all of the remaining links from this device to any other
 	 * devices (either consumers or suppliers).
 	 */
+	mutex_lock(&fwnode_link_lock);
 	device_links_write_lock();
 
 	list_for_each_entry_safe_reverse(link, ln, &dev->links.suppliers, c_node) {
@@ -1705,10 +1707,24 @@ static void device_links_purge(struct device *dev)
 	list_for_each_entry_safe_reverse(link, ln, &dev->links.consumers, s_node) {
 		WARN_ON(link->status != DL_STATE_DORMANT &&
 			link->status != DL_STATE_NONE);
+		/* The supplier may return as a new device with no consumer links. */
+		if (device_link_test(link, DL_FLAG_AUTOPROBE_CONSUMER)) {
+			if (device_link_test(link, DL_FLAG_INFERRED) &&
+			    link->consumer->fwnode && dev->fwnode) {
+				ret = __fwnode_link_add(link->consumer->fwnode,
+							dev->fwnode, 0);
+				if (ret)
+					dev_warn(link->consumer,
+						 "Failed to restore supplier firmware link: %d\n",
+						 ret);
+			}
+			driver_deferred_probe_add(link->consumer);
+		}
 		__device_link_del(&link->kref);
 	}
 
 	device_links_write_unlock();
+	mutex_unlock(&fwnode_link_lock);
 }
 
 #define FW_DEVLINK_FLAGS_PERMISSIVE	(DL_FLAG_INFERRED | \

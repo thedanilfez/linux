@@ -4,6 +4,7 @@
 
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <sound/jack.h>
 #include <linux/input-event-codes.h>
 #include "common.h"
@@ -23,13 +24,23 @@ static const struct snd_soc_dapm_widget qcom_jack_snd_widgets[] = {
 	SND_SOC_DAPM_SPK("DP7 Jack", NULL),
 };
 
+static void qcom_snd_put_of_node(void *data)
+{
+	of_node_put(data);
+}
+
+static void qcom_snd_put_dai_link_codecs(void *data)
+{
+	snd_soc_of_put_dai_link_codecs(data);
+}
+
 int qcom_snd_parse_of(struct snd_soc_card *card)
 {
 	struct device *dev = card->dev;
 	struct snd_soc_dai_link *link;
 	struct of_phandle_args args;
 	struct snd_soc_dai_link_component *dlc;
-	int ret, num_links;
+	int i, ret, num_links;
 
 	ret = snd_soc_of_parse_card_name(card, "model");
 	if (ret == 0 && !card->name)
@@ -107,14 +118,25 @@ int qcom_snd_parse_of(struct snd_soc_card *card)
 			return -EINVAL;
 		}
 
+		args.np = NULL;
 		ret = snd_soc_of_get_dlc(cpu, &args, link->cpus, 0);
 		if (ret) {
+			of_node_put(args.np);
 			dev_err_probe(card->dev, ret,
 				      "%s: error getting cpu dai name\n", link->name);
 			return ret;
 		}
 
+		ret = devm_add_action_or_reset(dev, qcom_snd_put_of_node,
+					       link->cpus->of_node);
+		if (ret)
+			return ret;
+
 		link->id = args.args[0];
+		/* Keep DAI names valid when providers are removed and reprobed. */
+		link->cpus->dai_name = devm_kstrdup(dev, link->cpus->dai_name, GFP_KERNEL);
+		if (!link->cpus->dai_name)
+			return -ENOMEM;
 
 		if (link->id >= LPASS_MAX_PORT) {
 			dev_err(dev, "%s: Invalid cpu dai id %d\n", link->name, link->id);
@@ -129,6 +151,10 @@ int qcom_snd_parse_of(struct snd_soc_card *card)
 				dev_err(card->dev, "%s: platform dai not found\n", link->name);
 				return -EINVAL;
 			}
+			ret = devm_add_action_or_reset(dev, qcom_snd_put_of_node,
+						       link->platforms->of_node);
+			if (ret)
+				return ret;
 		} else {
 			link->platforms->of_node = link->cpus->of_node;
 		}
@@ -139,6 +165,16 @@ int qcom_snd_parse_of(struct snd_soc_card *card)
 				dev_err_probe(card->dev, ret,
 					      "%s: codec dai not found\n", link->name);
 				return ret;
+			}
+
+			ret = devm_add_action_or_reset(dev, qcom_snd_put_dai_link_codecs, link);
+			if (ret)
+				return ret;
+
+			for_each_link_codecs(link, i, dlc) {
+				dlc->dai_name = devm_kstrdup(dev, dlc->dai_name, GFP_KERNEL);
+				if (!dlc->dai_name)
+					return -ENOMEM;
 			}
 
 			if (platform) {

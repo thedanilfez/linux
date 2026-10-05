@@ -1490,7 +1490,7 @@ int wcd_dt_parse_mbhc_data(struct device *dev, struct wcd_mbhc_config *cfg)
 
 	for (i = 0; i < WCD_MBHC_DEF_BUTTONS; i++) {
 		if (ret) /* default voltage */
-			cfg->btn_high[i] = 500000;
+			cfg->btn_high[i] = 500;
 		else
 			/* Micro to Milli Volts */
 			cfg->btn_high[i] = cfg->btn_high[i]/1000;

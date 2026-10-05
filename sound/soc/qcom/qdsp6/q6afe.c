@@ -651,6 +651,10 @@ struct afe_cmd_remote_lpass_core_hw_vote_request {
 	char client_name[8];
 } __packed;
 
+struct afe_cmd_rsp_remote_lpass_core_hw_vote_request {
+	u32 client_handle;
+} __packed;
+
 struct afe_cmd_remote_lpass_core_hw_devote_request {
 	uint32_t  hw_block_id;
 	uint32_t client_handle;
@@ -967,6 +971,7 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
 {
 	struct q6afe *afe = dev_get_drvdata(&adev->dev);
 	const struct aprv2_ibasic_rsp_result_t *res;
+	const struct afe_cmd_rsp_remote_lpass_core_hw_vote_request *vote_rsp;
 	const struct apr_hdr *hdr = &data->hdr;
 	struct q6afe_port *port;
 
@@ -978,6 +983,9 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
 	//	hdr->opcode, res->opcode, res->status);
 	switch (hdr->opcode) {
 	case APR_BASIC_RSP_RESULT: {
+		if (data->payload_size < sizeof(*res))
+			return -EINVAL;
+
 		if (res->status) {
 			// EOK = 0
 			// EFAILED = 1
@@ -1003,6 +1011,10 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
 				wake_up(&afe->wait);
 			}
 			break;
+		case AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST:
+			afe->result = *res;
+			wake_up(&afe->wait);
+			break;
 		case AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST:
 			dev_err(afe->dev, "AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST clk_state=%d\n", res->status);
 			break;
@@ -1013,10 +1025,14 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
 	}
 		break;
 	case AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST:
+		if (data->payload_size < sizeof(*vote_rsp) ||
+		    hdr->token >= Q6AFE_LPASS_CORE_HW_VOTE_MAX)
+			return -EINVAL;
+
+		vote_rsp = data->payload;
+		afe->lpass_hw_core_client_hdl[hdr->token] = vote_rsp->client_handle;
 		afe->result.opcode = hdr->opcode;
-		afe->result.status = res->status;
-		if (hdr->token < Q6AFE_LPASS_CORE_HW_VOTE_MAX)
-			afe->lpass_hw_core_client_hdl[hdr->token] = res->opcode;
+		afe->result.status = 0;
 
 		wake_up(&afe->wait);
 		break;
@@ -1065,11 +1081,11 @@ static int afe_apr_send_pkt(struct q6afe *afe, struct apr_pkt *pkt,
 	ret = apr_send_pkt(afe->apr, pkt);
 	if (ret < 0) {
 		dev_err(afe->dev, "packet not transmitted (%d)\n", ret);
-		ret = -EINVAL;
 		goto err;
 	}
 
-	ret = wait_event_timeout(*wait, (result->opcode == rsp_opcode),
+	ret = wait_event_timeout(*wait, result->opcode == rsp_opcode ||
+				 (result->opcode == pkt->hdr.opcode && result->status),
 				 msecs_to_jiffies(TIMEOUT_MS));
 	if (!ret) {
 		ret = -ETIMEDOUT;
@@ -1933,6 +1949,9 @@ static int q6afe_probe(struct apr_device *adev)
 {
 	struct q6afe *afe;
 	struct device *dev = &adev->dev;
+
+	if (!q6core_is_adsp_ready())
+		return -EPROBE_DEFER;
 
 	afe = devm_kzalloc(dev, sizeof(*afe), GFP_KERNEL);
 	if (!afe)

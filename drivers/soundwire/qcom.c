@@ -416,11 +416,14 @@ static int swrm_wait_for_rd_fifo_avail(struct qcom_swrm_ctrl *ctrl)
 {
 	u32 fifo_outstanding_data, value;
 	int fifo_retry_count = SWR_OVERFLOW_RETRY_COUNT;
+	int ret;
 
 	do {
 		/* Check for fifo underflow during read */
-		ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_STATUS],
-			       &value);
+		ret = ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_STATUS],
+				     &value);
+		if (ret)
+			return -EIO;
 		fifo_outstanding_data = FIELD_GET(SWRM_RD_CMD_FIFO_CNT_MASK, value);
 
 		/* Check if read data is available in read fifo */
@@ -442,11 +445,14 @@ static int swrm_wait_for_wr_fifo_avail(struct qcom_swrm_ctrl *ctrl)
 {
 	u32 fifo_outstanding_cmds, value;
 	int fifo_retry_count = SWR_OVERFLOW_RETRY_COUNT;
+	int ret;
 
 	do {
 		/* Check for fifo overflow during write */
-		ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_STATUS],
-			       &value);
+		ret = ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_STATUS],
+				     &value);
+		if (ret)
+			return -EIO;
 		fifo_outstanding_cmds = FIELD_GET(SWRM_WR_CMD_FIFO_CNT_MASK, value);
 
 		/* Check for space in write fifo before writing */
@@ -543,6 +549,7 @@ static int qcom_swrm_cmd_fifo_rd_cmd(struct qcom_swrm_ctrl *ctrl,
 				     u32 len, u8 *rval)
 {
 	u32 cmd_data, cmd_id, val, retry_attempt = 0;
+	int ret;
 
 	val = swrm_get_packed_reg_val(&ctrl->rcmd_id, len, dev_addr, reg_addr);
 
@@ -550,37 +557,43 @@ static int qcom_swrm_cmd_fifo_rd_cmd(struct qcom_swrm_ctrl *ctrl,
 	 * Check for outstanding cmd wrt. write fifo depth to avoid
 	 * overflow as read will also increase write fifo cnt.
 	 */
-	swrm_wait_for_wr_fifo_avail(ctrl);
+	if (swrm_wait_for_wr_fifo_avail(ctrl))
+		return SDW_CMD_FAIL_OTHER;
 
 	/* wait for FIFO RD to complete to avoid overflow */
 	usleep_range(100, 105);
-	ctrl->reg_write(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_RD_CMD], val);
+	ret = ctrl->reg_write(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_RD_CMD], val);
+	if (ret)
+		return SDW_CMD_FAIL_OTHER;
 	/* wait for FIFO RD CMD complete to avoid overflow */
 	usleep_range(250, 255);
 
-	if (swrm_wait_for_rd_fifo_avail(ctrl))
-		return SDW_CMD_FAIL_OTHER;
-
 	do {
-		ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_RD_FIFO_ADDR],
-			       &cmd_data);
-		rval[0] = cmd_data & 0xFF;
+		if (swrm_wait_for_rd_fifo_avail(ctrl))
+			return SDW_CMD_FAIL_OTHER;
+
+		ret = ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_RD_FIFO_ADDR],
+				     &cmd_data);
+		if (ret)
+			return SDW_CMD_FAIL_OTHER;
 		cmd_id = FIELD_GET(SWRM_RD_FIFO_CMD_ID_MASK, cmd_data);
 
-		if (cmd_id != ctrl->rcmd_id) {
-			if (retry_attempt < (MAX_FIFO_RD_RETRY - 1)) {
-				/* wait 500 us before retry on fifo read failure */
-				usleep_range(500, 505);
-				ctrl->reg_write(ctrl, SWRM_CMD_FIFO_CMD,
-						SWRM_CMD_FIFO_FLUSH);
-				ctrl->reg_write(ctrl,
-						ctrl->reg_layout[SWRM_REG_CMD_FIFO_RD_CMD],
-						val);
-			}
-			retry_attempt++;
-		} else {
+		if (cmd_id == ctrl->rcmd_id) {
+			rval[0] = cmd_data & 0xFF;
 			return SDW_CMD_OK;
 		}
+
+		if (++retry_attempt == MAX_FIFO_RD_RETRY)
+			break;
+
+		/* wait 500 us before retry on fifo read failure */
+		usleep_range(500, 505);
+		ret = ctrl->reg_write(ctrl, SWRM_CMD_FIFO_CMD, SWRM_CMD_FIFO_FLUSH);
+		if (ret)
+			return SDW_CMD_FAIL_OTHER;
+		ret = ctrl->reg_write(ctrl, ctrl->reg_layout[SWRM_REG_CMD_FIFO_RD_CMD], val);
+		if (ret)
+			return SDW_CMD_FAIL_OTHER;
 
 	} while (retry_attempt < MAX_FIFO_RD_RETRY);
 
@@ -732,7 +745,14 @@ static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
 	u32 i;
 	int devnum;
 	int ret = IRQ_HANDLED;
-	clk_prepare_enable(ctrl->hclk);
+
+	if (READ_ONCE(ctrl->removing))
+		return IRQ_HANDLED;
+
+	ret = clk_prepare_enable(ctrl->hclk);
+	if (ret)
+		return IRQ_NONE;
+	ret = IRQ_HANDLED;
 
 	ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_INTERRUPT_STATUS],
 		       &intr_sts);
@@ -1552,9 +1572,10 @@ static int qcom_swrm_ssr_notify(struct notifier_block *nb,
 
 	if (event == QCOM_SSR_BEFORE_SHUTDOWN) {
 		WRITE_ONCE(ctrl->removing, true);
-		disable_irq_nosync(ctrl->irq);
+		disable_irq(ctrl->irq);
 		if (ctrl->wake_irq > 0)
-			disable_irq_nosync(ctrl->wake_irq);
+			disable_irq(ctrl->wake_irq);
+		sdw_clear_slave_status(&ctrl->bus, SDW_UNATTACH_REQUEST_MASTER_RESET);
 	}
 	/* Managed supplier links re-probe this controller with the new clocks. */
 	return NOTIFY_OK;
@@ -1590,7 +1611,7 @@ static int qcom_swrm_register_ssr(struct qcom_swrm_ctrl *ctrl)
 	if (!adsp)
 		return 0;
 	ctrl->ssr_nb.notifier_call = qcom_swrm_ssr_notify;
-	ctrl->ssr_cookie = qcom_register_ssr_notifier("adsp", &ctrl->ssr_nb);
+	ctrl->ssr_cookie = qcom_register_ssr_notifier("lpass", &ctrl->ssr_nb);
 	if (IS_ERR(ctrl->ssr_cookie))
 		return PTR_ERR(ctrl->ssr_cookie);
 	return devm_add_action_or_reset(ctrl->dev, qcom_swrm_ssr_unregister, ctrl);
@@ -1621,7 +1642,7 @@ static int qcom_swrm_link_macro(struct device *dev)
 		return -EPROBE_DEFER;
 	}
 	link = device_link_add(dev, &macro->dev,
-			      DL_FLAG_AUTOREMOVE_CONSUMER | DL_FLAG_PM_RUNTIME |
+			      DL_FLAG_AUTOPROBE_CONSUMER | DL_FLAG_PM_RUNTIME |
 			      DL_FLAG_RPM_ACTIVE);
 	put_device(&macro->dev);
 	return link ? 0 : -EINVAL;
@@ -1677,7 +1698,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		}
 	}
 
-	ctrl->irq = of_irq_get(dev->of_node, 0);
+	ctrl->irq = platform_get_irq(pdev, 0);
 	if (ctrl->irq < 0) {
 		ret = ctrl->irq;
 		goto err_init;
@@ -1704,6 +1725,14 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	ctrl->bus.compute_params = &qcom_swrm_compute_params;
 	ctrl->bus.clk_stop_timeout = 300;
 
+	/* Clear retained command state before starting enumeration. */
+	ret = ctrl->reg_write(ctrl, SWRM_COMP_SW_RESET, 0x01);
+	if (ret) {
+		ret = -EIO;
+		goto err_clk;
+	}
+	usleep_range(100, 105);
+
 	ret = qcom_swrm_get_port_config(ctrl);
 	if (ret)
 		goto err_clk;
@@ -1729,7 +1758,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(dev, ctrl->irq, NULL,
 					qcom_swrm_irq_handler,
-					IRQF_TRIGGER_RISING |
+					IRQF_TRIGGER_RISING | IRQF_NO_AUTOEN |
 					IRQF_ONESHOT,
 					"soundwire", ctrl);
 	if (ret) {
@@ -1745,7 +1774,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 						"swr_wake_irq", ctrl);
 		if (ret) {
 			dev_err(dev, "Failed to request soundwire wake irq\n");
-			goto err_init;
+			goto err_clk;
 		}
 	}
 
@@ -1764,6 +1793,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	}
 
 	qcom_swrm_init(ctrl);
+	enable_irq(ctrl->irq);
 	wait_for_completion_timeout(&ctrl->enumeration,
 				    msecs_to_jiffies(TIMEOUT_MS));
 	ret = qcom_swrm_register_ssr(ctrl);
@@ -1792,6 +1822,10 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	return 0;
 
 err_master_add:
+	WRITE_ONCE(ctrl->removing, true);
+	disable_irq(ctrl->irq);
+	if (ctrl->wake_irq > 0)
+		disable_irq(ctrl->wake_irq);
 	sdw_bus_master_delete(&ctrl->bus);
 err_clk:
 	clk_disable_unprepare(ctrl->hclk);

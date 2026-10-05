@@ -1788,6 +1788,7 @@ int regmap_add_irq_chip_fwnode(struct fwnode_handle *fwnode,
 			       const struct regmap_irq_chip *chip,
 			       struct regmap_irq_chip_data **data);
 void regmap_del_irq_chip(int irq, struct regmap_irq_chip_data *data);
+void regmap_irq_chip_shutdown(struct regmap_irq_chip_data *data);
 
 int devm_regmap_add_irq_chip(struct device *dev, struct regmap *map, int irq,
 			     int irq_flags, int irq_base,
