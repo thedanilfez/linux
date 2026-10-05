@@ -77,10 +77,16 @@ EXPORT_SYMBOL_GPL(wcd_dt_parse_micbias_info);
 
 static int wcd_sdw_component_bind(struct device *dev, struct device *master, void *data)
 {
+	int ret;
+
 	pm_runtime_set_autosuspend_delay(dev, 3000);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
-	pm_runtime_set_active(dev);
+	ret = pm_runtime_set_active(dev);
+	if (ret) {
+		pm_runtime_dont_use_autosuspend(dev);
+		return ret;
+	}
 	pm_runtime_enable(dev);
 
 	return 0;
@@ -102,11 +108,20 @@ EXPORT_SYMBOL_GPL(wcd_sdw_component_ops);
 int wcd_update_status(struct sdw_slave *slave, enum sdw_slave_status status)
 {
 	struct regmap *regmap = dev_get_regmap(&slave->dev, NULL);
+	int ret;
+
+	if (regmap && status == SDW_SLAVE_UNATTACHED) {
+		regcache_cache_only(regmap, true);
+		regcache_mark_dirty(regmap);
+	}
 
 	if (regmap && status == SDW_SLAVE_ATTACHED) {
 		/* Write out any cached changes that happened between probe and attach */
 		regcache_cache_only(regmap, false);
-		return regcache_sync(regmap);
+		ret = regcache_sync(regmap);
+		if (ret)
+			regcache_cache_only(regmap, true);
+		return ret;
 	}
 
 	return 0;
@@ -127,12 +142,22 @@ int wcd_interrupt_callback(struct sdw_slave *slave, struct irq_domain *slave_irq
 {
 	struct regmap *regmap = dev_get_regmap(&slave->dev, NULL);
 	u32 sts1, sts2, sts3;
+	int ret;
+
+	if (!slave_irq)
+		return 0;
 
 	do {
 		handle_nested_irq(irq_find_mapping(slave_irq, 0));
-		regmap_read(regmap, wcd_intr_status0, &sts1);
-		regmap_read(regmap, wcd_intr_status1, &sts2);
-		regmap_read(regmap, wcd_intr_status2, &sts3);
+		ret = regmap_read(regmap, wcd_intr_status0, &sts1);
+		if (ret)
+			return ret;
+		ret = regmap_read(regmap, wcd_intr_status1, &sts2);
+		if (ret)
+			return ret;
+		ret = regmap_read(regmap, wcd_intr_status2, &sts3);
+		if (ret)
+			return ret;
 
 	} while (sts1 || sts2 || sts3);
 

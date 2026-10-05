@@ -15,6 +15,7 @@
 #include <sound/tlv.h>
 #include <linux/of_clk.h>
 #include <linux/clk-provider.h>
+#include <linux/sort.h>
 
 #include "lpass-macro-common.h"
 
@@ -3775,6 +3776,14 @@ static const struct snd_soc_component_driver rx_macro_component_drv = {
 	.num_dapm_routes = ARRAY_SIZE(rx_audio_map),
 };
 
+static int rx_macro_reg_defaults_cmp(const void *a, const void *b)
+{
+	const struct reg_default *ra = a;
+	const struct reg_default *rb = b;
+
+	return (ra->reg > rb->reg) - (ra->reg < rb->reg);
+}
+
 static int rx_macro_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -3867,6 +3876,7 @@ static int rx_macro_probe(struct platform_device *pdev)
 	if (!reg_config)
 		return -ENOMEM;
 
+	sort(reg_defaults, def_count, sizeof(*reg_defaults), rx_macro_reg_defaults_cmp, NULL);
 	reg_config->reg_defaults = reg_defaults;
 	reg_config->num_reg_defaults = def_count;
 

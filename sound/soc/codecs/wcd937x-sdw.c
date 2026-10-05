@@ -1045,15 +1045,10 @@ static int wcd9370_probe(struct sdw_slave *pdev,
 			wcd->ch_info[i].master_ch_mask = WCD937X_SWRM_CH_MASK(master_ch_mask[i]);
 	}
 
-
-	ret = component_add(dev, &wcd_sdw_component_ops);
-	if (ret)
-		return ret;
-
-	/* Set suspended until aggregate device is bind */
+	/* Component binding enables runtime PM. */
 	pm_runtime_set_suspended(dev);
 
-	return 0;
+	return component_add(dev, &wcd_sdw_component_ops);
 }
 
 static void wcd9370_remove(struct sdw_slave *pdev)
@@ -1084,10 +1079,19 @@ static int wcd937x_sdw_runtime_suspend(struct device *dev)
 static int wcd937x_sdw_runtime_resume(struct device *dev)
 {
 	struct wcd937x_sdw_priv *wcd = dev_get_drvdata(dev);
+	int ret;
+
+	ret = sdw_slave_wait_for_init(wcd->sdev, 5000);
+	if (ret)
+		return ret;
 
 	if (wcd->regmap) {
 		regcache_cache_only(wcd->regmap, false);
-		regcache_sync(wcd->regmap);
+		ret = regcache_sync(wcd->regmap);
+		if (ret) {
+			regcache_cache_only(wcd->regmap, true);
+			return ret;
+		}
 	}
 
 	return 0;

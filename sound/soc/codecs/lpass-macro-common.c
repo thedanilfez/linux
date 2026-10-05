@@ -73,7 +73,7 @@ lpass_macro_regmap_register_ssr(struct device *dev, struct regmap *regmap)
 	ssr->regmap = regmap;
 	mutex_init(&ssr->lock);
 	ssr->nb.notifier_call = lpass_macro_ssr_notify;
-	ssr->cookie = qcom_register_ssr_notifier("adsp", &ssr->nb);
+	ssr->cookie = qcom_register_ssr_notifier("lpass", &ssr->nb);
 	if (IS_ERR(ssr->cookie))
 		return ERR_CAST(ssr->cookie);
 	ret = devm_add_action_or_reset(dev, lpass_macro_ssr_unregister, ssr);
@@ -126,10 +126,10 @@ static int lpass_macro_link_clock_suppliers(struct device *dev)
 
 		/* APR clock devices disappear on an audio protection-domain restart. */
 		if (of_device_is_compatible(args.np, "qcom,q6afe-clocks")) {
-			flags = DL_FLAG_AUTOREMOVE_CONSUMER;
+			flags = DL_FLAG_AUTOPROBE_CONSUMER;
 		} else if (of_property_present(args.np, "#sound-dai-cells")) {
 			/* The fsgen gate is in another macro's register/power domain. */
-			flags = DL_FLAG_AUTOREMOVE_CONSUMER | DL_FLAG_PM_RUNTIME |
+			flags = DL_FLAG_AUTOPROBE_CONSUMER | DL_FLAG_PM_RUNTIME |
 				DL_FLAG_RPM_ACTIVE;
 		} else {
 			of_node_put(args.np);

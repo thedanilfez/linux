@@ -194,6 +194,15 @@ static void sm8250_add_be_ops(struct snd_soc_card *card)
 	}
 }
 
+static int sm8250_snd_remove(struct snd_soc_card *card)
+{
+	struct sm8250_snd_data *data = snd_soc_card_get_drvdata(card);
+
+	data->jack_setup = false;
+
+	return 0;
+}
+
 static int sm8250_platform_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card;
@@ -212,6 +221,7 @@ static int sm8250_platform_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	card->dev = dev;
+	card->remove = sm8250_snd_remove;
 	dev_set_drvdata(dev, card);
 	snd_soc_card_set_drvdata(card, data);
 	ret = qcom_snd_parse_of(card);
