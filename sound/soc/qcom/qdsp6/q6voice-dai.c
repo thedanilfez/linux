@@ -141,7 +141,7 @@ static const struct snd_pcm_hardware q6voice_dai_hardware = {
 	.buffer_bytes_max =	64 * 1024,
 	.period_bytes_min =	64,
 	.period_bytes_max =	64 * 1024,
-	.periods_min =		1,
+	.periods_min =		2,
 	.periods_max =		1024,
 	.fifo_size =		0,
 };
@@ -173,12 +173,21 @@ q6voice_dai_pointer(struct snd_soc_component *component,
 		    struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	snd_pcm_uframes_t pos = READ_ONCE(runtime->control->appl_ptr);
+	snd_pcm_uframes_t queued;
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
-		pos += runtime->period_size;
+		return (READ_ONCE(runtime->control->appl_ptr) +
+			runtime->period_size) % runtime->buffer_size;
 
-	return pos % runtime->buffer_size;
+	/*
+	 * Keep one period queued: an empty playback buffer is an XRUN, and its
+	 * recovery re-prepares the backend, restarting the AFE port mid-call.
+	 */
+	queued = snd_pcm_playback_hw_avail(runtime);
+	if (runtime->state != SNDRV_PCM_STATE_DRAINING)
+		queued -= min(queued, runtime->period_size);
+
+	return (runtime->status->hw_ptr + queued) % runtime->buffer_size;
 }
 
 static int q6voice_get_mixer(struct snd_kcontrol *kcontrol,
