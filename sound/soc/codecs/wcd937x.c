@@ -5,12 +5,10 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
-#include <linux/iopoll.h>
 #include <linux/irqdomain.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
@@ -243,40 +241,6 @@ static const struct regmap_irq_chip wcd937x_regmap_irq_chip = {
 	.handle_post_irq = wcd937x_handle_post_irq,
 	.irq_drv_data = NULL,
 };
-
-static int wcd937x_reset(struct wcd937x_priv *wcd937x)
-{
-	struct device *rxdev, *txdev;
-	enum sdw_slave_status status;
-	int ret;
-
-	rxdev = of_sdw_find_device_by_node(wcd937x->rxnode);
-	if (!rxdev)
-		return -EPROBE_DEFER;
-	txdev = of_sdw_find_device_by_node(wcd937x->txnode);
-	if (!txdev) {
-		ret = -EPROBE_DEFER;
-		goto put_rxdev;
-	}
-
-	gpiod_set_value_cansleep(wcd937x->reset_gpio, 1);
-	usleep_range(20, 30);
-	/* Reinitialize both bus completions before releasing the shared reset. */
-	ret = read_poll_timeout(READ_ONCE, status, status == SDW_SLAVE_UNATTACHED,
-				100, 20000, false, dev_to_sdw_dev(rxdev)->status);
-	if (ret)
-		goto release_reset;
-	ret = read_poll_timeout(READ_ONCE, status, status == SDW_SLAVE_UNATTACHED,
-				100, 20000, false, dev_to_sdw_dev(txdev)->status);
-
-release_reset:
-	gpiod_set_value_cansleep(wcd937x->reset_gpio, 0);
-	usleep_range(20, 30);
-	put_device(txdev);
-put_rxdev:
-	put_device(rxdev);
-	return ret;
-}
 
 static void wcd937x_io_init(struct regmap *regmap)
 {
@@ -2664,10 +2628,6 @@ static int wcd937x_soc_codec_probe(struct snd_soc_component *component)
 	if (ret)
 		return ret;
 
-	ret = sdw_slave_wait_for_init(dev_to_sdw_dev(wcd937x->rxdev), 5000);
-	if (ret)
-		return ret;
-
 	snd_soc_component_init_regmap(component, wcd937x->regmap);
 	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0)
@@ -2742,9 +2702,6 @@ err_free_clsh:
 static void wcd937x_soc_codec_remove(struct snd_soc_component *component)
 {
 	struct wcd937x_priv *wcd937x = snd_soc_component_get_drvdata(component);
-
-	if (wcd937x->tx_sdw_dev->status == SDW_SLAVE_UNATTACHED)
-		regmap_irq_chip_shutdown(wcd937x->irq_chip);
 
 	wcd937x_mbhc_deinit(component);
 	wcd937x_free_watchdog_irqs(wcd937x);
@@ -2939,6 +2896,18 @@ static int wcd937x_bind(struct device *dev)
 	wcd937x->sdw_priv[AIF1_CAP]->wcd937x = wcd937x;
 	wcd937x->tx_sdw_dev = dev_to_sdw_dev(wcd937x->txdev);
 
+	/* The codec is held in reset since probe or the last unbind. */
+	gpiod_set_value_cansleep(wcd937x->reset_gpio, 0);
+	usleep_range(20, 30);
+
+	ret = sdw_slave_wait_for_init(dev_to_sdw_dev(wcd937x->rxdev), 5000);
+	if (ret)
+		goto err_put_txdev;
+
+	ret = sdw_slave_wait_for_init(wcd937x->tx_sdw_dev, 5000);
+	if (ret)
+		goto err_put_txdev;
+
 	/*
 	 * As TX is the main CSR reg interface, which should not be suspended first.
 	 * expicilty add the dependency link
@@ -3028,6 +2997,8 @@ static void wcd937x_unbind(struct device *dev)
 	device_link_remove(dev, wcd937x->rxdev);
 	device_link_remove(wcd937x->rxdev, wcd937x->txdev);
 	component_unbind_all(dev, wcd937x);
+	/* Keep the codec quiet while the SoundWire buses are gone. */
+	gpiod_set_value_cansleep(wcd937x->reset_gpio, 1);
 	put_device(wcd937x->txdev);
 	put_device(wcd937x->rxdev);
 	wcd937x->txdev = NULL;
@@ -3070,63 +3041,6 @@ static int wcd937x_add_slave_components(struct wcd937x_priv *wcd937x,
 	return 0;
 }
 
-static int wcd937x_link_swr_suppliers(struct device *dev)
-{
-	static const char * const devices[] = { "qcom,rx-device", "qcom,tx-device" };
-	struct device_node *slave, *np;
-	struct platform_device *swr;
-	struct device_link *link;
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(devices); i++) {
-		slave = of_parse_phandle(dev->of_node, devices[i], 0);
-		if (!slave)
-			return -ENODEV;
-		np = of_get_parent(slave);
-		of_node_put(slave);
-		swr = of_find_device_by_node(np);
-		of_node_put(np);
-		if (!swr)
-			return -EPROBE_DEFER;
-
-		device_lock(&swr->dev);
-		if (!device_is_bound(&swr->dev)) {
-			device_unlock(&swr->dev);
-			put_device(&swr->dev);
-			return -EPROBE_DEFER;
-		}
-		/* Rebuild the codec after either SoundWire controller is reprobed. */
-		link = device_link_add(dev, &swr->dev,
-				       DL_FLAG_AUTOPROBE_CONSUMER | DL_FLAG_PM_RUNTIME |
-				       DL_FLAG_RPM_ACTIVE);
-		device_unlock(&swr->dev);
-		put_device(&swr->dev);
-		if (!link)
-			return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int wcd937x_wait_for_sdw_init(struct wcd937x_priv *wcd937x)
-{
-	struct device_node *nodes[] = { wcd937x->rxnode, wcd937x->txnode };
-	struct device *dev;
-	int i, ret;
-
-	for (i = 0; i < ARRAY_SIZE(nodes); i++) {
-		dev = of_sdw_find_device_by_node(nodes[i]);
-		if (!dev)
-			return -EPROBE_DEFER;
-		ret = sdw_slave_wait_for_init(dev_to_sdw_dev(dev), 5000);
-		put_device(dev);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 static int wcd937x_probe(struct platform_device *pdev)
 {
 	struct component_match *match = NULL;
@@ -3134,10 +3048,6 @@ static int wcd937x_probe(struct platform_device *pdev)
 	struct wcd937x_priv *wcd937x;
 	struct wcd_mbhc_config *cfg;
 	int ret;
-
-	ret = wcd937x_link_swr_suppliers(dev);
-	if (ret)
-		return dev_err_probe(dev, ret, "Failed to link SoundWire controllers\n");
 
 	wcd937x = devm_kzalloc(dev, sizeof(*wcd937x), GFP_KERNEL);
 	if (!wcd937x)
@@ -3147,7 +3057,8 @@ static int wcd937x_probe(struct platform_device *pdev)
 	wcd937x->common.dev = dev;
 	wcd937x->common.max_bias = 3;
 
-	wcd937x->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	/* Released in bind, once both SoundWire slaves exist. */
+	wcd937x->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(wcd937x->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(wcd937x->reset_gpio),
 				     "failed to reset wcd gpio\n");
@@ -3183,19 +3094,6 @@ static int wcd937x_probe(struct platform_device *pdev)
 	ret = wcd937x_add_slave_components(wcd937x, dev, &match);
 	if (ret)
 		return ret;
-
-	/* Enumeration completes before the controllers finish slave initialization. */
-	ret = wcd937x_wait_for_sdw_init(wcd937x);
-	if (ret)
-		return dev_err_probe(dev, ret, "SoundWire slaves are not initialized\n");
-
-	ret = wcd937x_reset(wcd937x);
-	if (ret)
-		return dev_err_probe(dev, ret, "Codec failed to detach during reset\n");
-
-	ret = wcd937x_wait_for_sdw_init(wcd937x);
-	if (ret)
-		return dev_err_probe(dev, ret, "Codec failed to reattach after reset\n");
 
 	mutex_init(&wcd937x->micb_lock);
 

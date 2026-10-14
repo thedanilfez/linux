@@ -50,7 +50,6 @@ struct regmap_irq_chip_data {
 				    unsigned int base, int index);
 
 	unsigned int clear_status:1;
-	unsigned int shutdown:1;
 };
 
 static inline const
@@ -88,9 +87,6 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 	int i, j, ret;
 	u32 reg;
 	u32 val;
-
-	if (d->shutdown)
-		goto out;
 
 	if (d->chip->runtime_pm) {
 		ret = pm_runtime_get_sync(map->dev);
@@ -198,7 +194,6 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 	if (d->chip->runtime_pm)
 		pm_runtime_put(map->dev);
 
-out:
 	/* If we've changed our wakeup count propagate it to the parent */
 	if (d->wake_count < 0)
 		for (i = d->wake_count; i < 0; i++)
@@ -993,23 +988,6 @@ int regmap_add_irq_chip(struct regmap *map, int irq, int irq_flags,
 					  irq_flags, irq_base, chip, data);
 }
 EXPORT_SYMBOL_GPL(regmap_add_irq_chip);
-
-/**
- * regmap_irq_chip_shutdown() - Quiesce an inaccessible IRQ controller
- * @d: Regmap IRQ controller to shut down
- *
- * Stop interrupt delivery and hardware accesses before freeing child IRQs.
- * The parent IRQ must not be shared. Call once before regmap_del_irq_chip();
- * the controller cannot be reused after this call.
- */
-void regmap_irq_chip_shutdown(struct regmap_irq_chip_data *d)
-{
-	disable_irq(d->irq);
-	mutex_lock(&d->lock);
-	d->shutdown = true;
-	mutex_unlock(&d->lock);
-}
-EXPORT_SYMBOL_GPL(regmap_irq_chip_shutdown);
 
 /**
  * regmap_del_irq_chip() - Stop interrupt handling for a regmap IRQ chip

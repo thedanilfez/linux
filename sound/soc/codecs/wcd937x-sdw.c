@@ -1081,20 +1081,16 @@ static int wcd937x_sdw_runtime_resume(struct device *dev)
 	struct wcd937x_sdw_priv *wcd = dev_get_drvdata(dev);
 	int ret;
 
-	ret = sdw_slave_wait_for_init(wcd->sdev, 5000);
+	/* update_status() syncs the cache once the slave attaches. */
+	if (!wcd->regmap || wcd->sdev->status == SDW_SLAVE_UNATTACHED)
+		return 0;
+
+	regcache_cache_only(wcd->regmap, false);
+	ret = regcache_sync(wcd->regmap);
 	if (ret)
-		return ret;
+		regcache_cache_only(wcd->regmap, true);
 
-	if (wcd->regmap) {
-		regcache_cache_only(wcd->regmap, false);
-		ret = regcache_sync(wcd->regmap);
-		if (ret) {
-			regcache_cache_only(wcd->regmap, true);
-			return ret;
-		}
-	}
-
-	return 0;
+	return ret;
 }
 
 static const struct dev_pm_ops wcd937x_sdw_pm_ops = {
@@ -1109,6 +1105,8 @@ static struct sdw_driver wcd9370_codec_driver = {
 	.driver = {
 		.name = "wcd9370-codec",
 		.pm = pm_ptr(&wcd937x_sdw_pm_ops),
+		/* Bind waits for enumeration, which starts after the slaves are added. */
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	}
 };
 module_sdw_driver(wcd9370_codec_driver);
