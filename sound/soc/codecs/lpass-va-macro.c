@@ -1729,10 +1729,10 @@ static void va_macro_remove(struct platform_device *pdev)
 		if (va->has_npl_clk)
 			clk_disable_unprepare(va->npl);
 		clk_disable_unprepare(va->mclk);
+		clk_disable_unprepare(va->dcodec);
+		clk_disable_unprepare(va->macro);
 	}
 	pm_runtime_set_suspended(dev);
-	clk_disable_unprepare(va->dcodec);
-	clk_disable_unprepare(va->macro);
 	lpass_macro_pds_exit(va->pds);
 }
 
@@ -1747,6 +1747,8 @@ static int va_macro_runtime_suspend(struct device *dev)
 		clk_disable_unprepare(va->npl);
 
 	clk_disable_unprepare(va->mclk);
+	clk_disable_unprepare(va->dcodec);
+	clk_disable_unprepare(va->macro);
 
 	return 0;
 }
@@ -1758,9 +1760,15 @@ static int va_macro_runtime_resume(struct device *dev)
 
 	if (lpass_macro_is_ssr_down(va->ssr))
 		return -EHOSTDOWN;
-	ret = clk_prepare_enable(va->mclk);
+	ret = clk_prepare_enable(va->macro);
 	if (ret)
 		return ret;
+	ret = clk_prepare_enable(va->dcodec);
+	if (ret)
+		goto err_dcodec;
+	ret = clk_prepare_enable(va->mclk);
+	if (ret)
+		goto err_mclk;
 	if (va->has_npl_clk) {
 		ret = clk_prepare_enable(va->npl);
 		if (ret)
@@ -1783,6 +1791,10 @@ err_sync:
 		clk_disable_unprepare(va->npl);
 err_npl:
 	clk_disable_unprepare(va->mclk);
+err_mclk:
+	clk_disable_unprepare(va->dcodec);
+err_dcodec:
+	clk_disable_unprepare(va->macro);
 	return ret;
 }
 

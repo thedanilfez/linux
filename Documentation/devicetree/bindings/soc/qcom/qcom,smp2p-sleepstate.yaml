@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/qcom/qcom,smp2p-sleepstate.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm SMP2P sleep state notifier
+
+maintainers:
+  - Bjorn Andersson <andersson@kernel.org>
+
+description:
+  Reports the application processor suspend state to a remote processor
+  through an outbound SMP2P entry, and lets the remote processor request a
+  system wakeup through an inbound SMP2P entry. The sensors framework on the
+  DSP uses it to batch data while the system is suspended.
+
+properties:
+  compatible:
+    const: qcom,smp2p-sleepstate
+
+  interrupts:
+    maxItems: 1
+    description: Wakeup request from the remote processor.
+
+  qcom,smem-states:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    maxItems: 1
+    description: Outbound SMP2P entry and the bit reporting the awake state.
+
+required:
+  - compatible
+  - interrupts
+  - qcom,smem-states
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    smp2p-sleepstate {
+        compatible = "qcom,smp2p-sleepstate";
+        interrupts-extended = <&smp2p_sleepstate_in 0 IRQ_TYPE_EDGE_RISING>;
+        qcom,smem-states = <&smp2p_sleepstate_out 12>;
+    };

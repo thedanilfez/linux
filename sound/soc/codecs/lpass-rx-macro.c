@@ -3972,10 +3972,10 @@ static void rx_macro_remove(struct platform_device *pdev)
 		clk_disable_unprepare(rx->fsgen);
 		clk_disable_unprepare(rx->npl);
 		clk_disable_unprepare(rx->mclk);
+		clk_disable_unprepare(rx->dcodec);
+		clk_disable_unprepare(rx->macro);
 	}
 	pm_runtime_set_suspended(dev);
-	clk_disable_unprepare(rx->dcodec);
-	clk_disable_unprepare(rx->macro);
 }
 
 static const struct of_device_id rx_macro_dt_match[] = {
@@ -4012,6 +4012,8 @@ static int rx_macro_runtime_suspend(struct device *dev)
 	clk_disable_unprepare(rx->fsgen);
 	clk_disable_unprepare(rx->npl);
 	clk_disable_unprepare(rx->mclk);
+	clk_disable_unprepare(rx->dcodec);
+	clk_disable_unprepare(rx->macro);
 
 	return 0;
 }
@@ -4023,9 +4025,15 @@ static int rx_macro_runtime_resume(struct device *dev)
 
 	if (lpass_macro_is_ssr_down(rx->ssr))
 		return -EHOSTDOWN;
-	ret = clk_prepare_enable(rx->mclk);
+	ret = clk_prepare_enable(rx->macro);
 	if (ret)
 		return ret;
+	ret = clk_prepare_enable(rx->dcodec);
+	if (ret)
+		goto err_dcodec;
+	ret = clk_prepare_enable(rx->mclk);
+	if (ret)
+		goto err_mclk;
 	ret = clk_prepare_enable(rx->npl);
 	if (ret)
 		goto err_npl;
@@ -4050,6 +4058,10 @@ err_fsgen:
 	clk_disable_unprepare(rx->npl);
 err_npl:
 	clk_disable_unprepare(rx->mclk);
+err_mclk:
+	clk_disable_unprepare(rx->dcodec);
+err_dcodec:
+	clk_disable_unprepare(rx->macro);
 	return ret;
 }
 

@@ -209,6 +209,16 @@ config QCOM_SMP2P
 	  Say yes here to support the Qualcomm Shared Memory Point to Point
 	  protocol.
 
+config QCOM_SMP2P_SLEEPSTATE
+	tristate "Qualcomm SMP2P sleep state notifier"
+	depends on QCOM_SMP2P
+	depends on PM_SLEEP
+	help
+	  Say yes here to report the application processor suspend state
+	  to remote processors over SMP2P. The sensors framework running
+	  on the DSP uses it to batch data while the system is suspended
+	  and to wake the system up when its buffers fill up.
+
 config QCOM_SMSM
 	tristate "Qualcomm Shared Memory State Machine"
 	depends on MAILBOX
